@@ -688,3 +688,28 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"failed with exit 9"* ]]
 }
+
+@test "apt_update_verdict refuses an update that could not fetch the archive" {
+    out=$BATS_TEST_TMPDIR/update.txt
+    printf '%s\n' \
+        "Hit:1 https://deb.debian.org/debian trixie InRelease" \
+        "W: Failed to fetch https://archive.keellinux.org/dists/trixie/InRelease  SSL connection failed [IP: 127.0.1.1 443]" \
+        "W: Some index files failed to download. They have been ignored, or old ones used instead." \
+        > "$out"
+
+    run bt_apt_update_verdict 0 "$out"
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not fetch"* ]]
+}
+
+@test "archive_reachable refuses a loopback answer and accepts a routable one" {
+    run bt_archive_reachable "127.0.1.1     archive.keellinux.org"
+    [ "$status" -ne 0 ]
+    run bt_archive_reachable "::1           archive.keellinux.org"
+    [ "$status" -ne 0 ]
+    run bt_archive_reachable "2804:710:d0:5::13 STREAM archive.keellinux.org"
+    [ "$status" -eq 0 ]
+    run bt_archive_reachable ""
+    [ "$status" -ne 0 ]
+}

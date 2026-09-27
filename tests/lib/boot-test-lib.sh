@@ -39,6 +39,10 @@ BT_WP_ROOT="var/www/wordpress"
 BT_WP_CONFIG="$BT_WP_ROOT/wp-config.php"
 # The project's own APT archive, and the keyring it must be verified with.
 BT_ARCHIVE_URI="https://archive.keellinux.org"
+# The host alone, for the reachability check: a name is only a proof of the
+# update path when the container can actually reach it.
+BT_ARCHIVE_HOST="${BT_ARCHIVE_URI#*://}"
+BT_ARCHIVE_HOST="${BT_ARCHIVE_HOST%%/*}"
 BT_ARCHIVE_SUITE="trixie"
 BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.gpg"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
@@ -534,6 +538,23 @@ bt_sources_verdict() {
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
 }
 
+bt_archive_reachable() {
+    # bt_archive_reachable HOST_OUTPUT: whether the archive's name resolves to
+    # something this container could actually talk to. HOST_OUTPUT is
+    # "getent ahosts <archive host>" run inside it.
+    #
+    # Why this exists. The CI runner's containers have no global address and
+    # no IPv4 route out, and the runner resolves our own public names through
+    # a local answer, so inside one of them the archive is 127.0.0.1 and apt
+    # meets the container's own web server instead. That is the runner's
+    # network, not the appliance, and failing the appliance for it would teach
+    # us to ignore a red gate. Skipping silently would be worse, so the caller
+    # says out loud what it did not prove.
+    local output=$1
+    [ -n "$output" ] || return 1
+    ! grep -qE '^(127\.|::1[[:space:]])' <<< "$output"
+}
+
 bt_apt_update_verdict() {
     # bt_apt_update_verdict CODE FILE: apt-get update must succeed and must
     # have verified a signature. apt says nothing when a signature is good, so
@@ -555,6 +576,16 @@ bt_apt_update_verdict() {
     done
     if ! grep -qF "$BT_ARCHIVE_URI" "$output"; then
         echo "boot-test: apt-get update never reached $BT_ARCHIVE_URI" >&2
+        return 1
+    fi
+    # A fetch that failed leaves apt at exit 0 with a warning, and the earlier
+    # checks pass because the archive's name is in that very warning. Saying
+    # the signature verified there is the worst thing this test could do: it
+    # reports the update path as proved on a machine that never read the
+    # archive. 2026-09-27, when it did exactly that.
+    if grep -qE 'W: Failed to fetch|Some index files failed to download' "$output"; then
+        echo "boot-test: apt-get update could not fetch $BT_ARCHIVE_URI" >&2
+        grep -E 'W: Failed to fetch' "$output" | head -2 >&2
         return 1
     fi
     echo "boot-test: apt-get update read $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE and verified its signature"
