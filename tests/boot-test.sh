@@ -223,6 +223,17 @@ bt_sources_verdict "$BT_ROOTFS/$BT_SOURCES"
 if [ "$BT_SKIP_UPDATE" -eq 1 ]; then
     log "--skip-update: the two APT proofs were not run"
 else
+    resolved=$(inside "getent ahosts $BT_ARCHIVE_HOST" 2>/dev/null || true)
+    if ! bt_archive_reachable "$resolved"; then
+        log "SKIPPED: the four archive proofs. $BT_ARCHIVE_HOST resolves to a"
+        log "         loopback address inside this container, so apt would"
+        log "         reach the container itself. That is the runner's"
+        log "         network, not the appliance: tracker#5."
+        printf '%s\n' "$resolved" | head -2
+        BT_SKIP_UPDATE=1
+    fi
+fi
+if [ "$BT_SKIP_UPDATE" -eq 0 ]; then
     update_out=$container_dir/apt-update.txt
     set +e
     inside 'apt-get update' > "$update_out" 2>&1
