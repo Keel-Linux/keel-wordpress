@@ -10,9 +10,10 @@ setup() {
     export KEEL_SOURCES="$S/keel.sources"
     export KEEL_KEYRING="$S/keel-archive-keyring.gpg"
     export KEEL_STAGING_LIST="$S/keel-staging.list"
+    export KEEL_STAGING_KEYRING="$S/keel-staging-keyring.asc"
     _keyring
     _sources
-    rm -f "$KEEL_STAGING_LIST"
+    rm -f "$KEEL_STAGING_LIST" "$KEEL_STAGING_KEYRING"
     # gpg is stubbed: a keyring is a file, and what matters to this script is
     # how many public keys the reader says are in it.
     STUBS="$S/bin"
@@ -102,11 +103,21 @@ _keyring() {
 }
 
 @test "a build time source still in the image is fatal" {
-    printf 'deb [trusted=yes] file:///srv/keel-apt/repo trixie-staging main\n' \
+    printf 'deb [signed-by=/etc/apt/keyrings/keel-staging-keyring.asc] file:///srv/keel-apt/repo trixie-staging main\n' \
         > "$KEEL_STAGING_LIST"
     run bash "$SCRIPT"
     [ "$status" -ne 0 ]
     [[ "$output" == *"zz-project-packages did not run"* ]]
+    grep -qx "Enabled: no" "$KEEL_SOURCES"
+}
+
+@test "the build time staging keyring still in the image is fatal" {
+    # It verified the archive during the build and it signs whatever the build
+    # host produced, so it is not an appliance's business (tracker#7).
+    printf 'the staging public key\n' > "$KEEL_STAGING_KEYRING"
+    run bash "$SCRIPT"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"must not reach an appliance"* ]]
     grep -qx "Enabled: no" "$KEEL_SOURCES"
 }
 

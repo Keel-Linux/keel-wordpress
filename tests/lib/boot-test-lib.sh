@@ -46,6 +46,14 @@ BT_ARCHIVE_HOST="${BT_ARCHIVE_HOST%%/*}"
 BT_ARCHIVE_SUITE="trixie"
 BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.gpg"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
+# What the build used to reach the project's own packages and what must not be
+# in the finished image: the copy of the staging archive, the source entry that
+# named it and the keyring the build verified it with (tracker#7). The staging
+# key signs whatever the build host produced, so an image that kept it would
+# carry trust in a nightly. Relative to the rootfs, like BT_SOURCES.
+BT_BUILD_LEFTOVERS="srv/keel-apt
+etc/apt/sources.list.d/keel-staging.list
+etc/apt/keyrings/keel-staging-keyring.asc"
 # What the two update proofs use, beyond apt-get update itself.
 #
 # A project package the image already carries, to show that apt would take its
@@ -517,6 +525,24 @@ bt_dashboard_verdict() {
         return 1
     fi
     echo "boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin"
+}
+
+bt_build_leftovers_verdict() {
+    # bt_build_leftovers_verdict ROOTFS: none of the build time files the
+    # recipe used to install the project's own packages is in the image. The
+    # recipe's conf script removes them and common/removelists-final/turnkey
+    # removes them again; this is the only place that reads the finished image
+    # and says so, which is what "not in the image" has to mean.
+    local rootfs=$1 path found=0
+    while read -r path; do
+        [ -n "$path" ] || continue
+        if [ -e "$rootfs/$path" ]; then
+            echo "boot-test: the image still carries the build time /$path" >&2
+            found=1
+        fi
+    done <<< "$BT_BUILD_LEFTOVERS"
+    [ "$found" -eq 0 ] || return 1
+    echo "boot-test: no build time package source, archive copy or staging keyring in the image"
 }
 
 bt_sources_verdict() {

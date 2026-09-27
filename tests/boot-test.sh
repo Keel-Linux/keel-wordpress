@@ -17,12 +17,15 @@
 #   5. the administrator logs in over HTTP with the declared app_password and
 #      is given a session cookie, a wrong password is refused, and the
 #      dashboard comes back for the session
-#   6. apt-get update against archive.keellinux.org verifies its signature,
+#   6. the image carries none of the build time files the recipe installed the
+#      project's own packages from: the copy of the staging archive, its
+#      source entry and the keyring that verified it
+#   7. apt-get update against archive.keellinux.org verifies its signature,
 #      apt takes a project package from that archive at the appliance's own pin
 #      priority, a project package the image has not got is fetched from it
 #      against the digest of the signed index, and a project package the image
 #      has is downloaded again and put through dpkg
-#   7. keel diff reports no drift between the spec and the machine
+#   8. keel diff reports no drift between the spec and the machine
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
 # verify; runnable by hand as root on any host with LXC, see tests/README.md.
@@ -219,6 +222,7 @@ rm -f "$passfile" "$container_dir/bad_password"
 #     the half of the deliverable that is not about WordPress, and it is proved
 #     on the booted machine because a source file that says the right thing and
 #     an apt that cannot verify the archive look identical from the build.
+bt_build_leftovers_verdict "$BT_ROOTFS"
 bt_sources_verdict "$BT_ROOTFS/$BT_SOURCES"
 if [ "$BT_SKIP_UPDATE" -eq 1 ]; then
     log "--skip-update: the two APT proofs were not run"
