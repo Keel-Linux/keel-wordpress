@@ -13,13 +13,13 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (73 tests) | 98.95 percent (282/285) under kcov | parsing, addresses, deadlines, the container marks, every verdict, and the image carrying none of the build time archive files |
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (13 tests) | 100 percent (26/26) under kcov | every way it enables and every way it refuses, including a staging keyring left in the image |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (14 tests) | 100 percent (31/31) under kcov | shared with keel-nodebb, where the pattern is maintained |
-| `bin/keel-archive-check` | `tests/archive-check.bats` (25 tests) | 100 percent (52/52) under kcov | the build time check of tracker#7: the copy is the live archive, the entry names the keyring through signed-by, nothing says trusted=yes, and the copied InRelease verifies against the staging key |
+| `bin/keel-archive-check` | `tests/archive-check.bats` (27 tests) | 100 percent (54/54) under kcov | the build time check of tracker#7: the copy is the live archive, the entry names the keyring through signed-by, nothing says trusted=yes, and the copied InRelease verifies against the staging key |
 | `overlay/usr/lib/inithooks/bin/wordpress.py` | none | 0 | dialog wrapper, only reached with a terminal attached |
 | `overlay/usr/lib/inithooks/lib/*.php` | the boot test | integration only | two PHP files `wp eval-file` runs; `conf.d/main` has PHP lint them |
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the six measured shell files: **99.07 percent (533/538)**, 194 bats
+Total over the six measured shell files: **99.07 percent (535/540)**, 196 bats
 tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
@@ -31,7 +31,7 @@ sets to **97**, the lowest measured file. It is only ever raised (decision
       97.73  43/44  40wordpress
       98.95  282/285  boot-test-lib.sh
       99.00  99/100  wordpress.sh
-     100.00  52/52  keel-archive-check
+     100.00  54/54  keel-archive-check
      100.00  29/29  zz-project-packages
      100.00  26/26  keel-archive-check
 

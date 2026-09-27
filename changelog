@@ -21,6 +21,12 @@ turnkey-wordpress-19.0 (3) turnkey; urgency=low
     and again on the tree that is about to be configured, which is a step
     where no apt-get update runs at all.
 
+  * The trusted=yes that bin/keel-archive-check refuses is one on the project
+    archive, not one on every apt source in the build tree. The captured pool
+    of decision 0012 sets Trusted: yes on purpose, for a file: index generated
+    on this machine from files keel-pool verify checks against the same digests
+    apt does, so the wider rule would have failed every pinned build.
+
   * conf.d/zz-project-packages removes the keyring with the source entry and
     the copy of the archive, conf.d/zzz-keel-archive refuses to enable the
     appliance's own source while either is still in the image, and the boot
