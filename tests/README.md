@@ -118,22 +118,29 @@ What it proves, in order:
     the form and no cookie. Fetching the login page proves nothing, and a check
     that only ever tries the right password cannot tell a working login from a
     site that lets anybody in.
-12. **The update path**: the shipped `keel.sources` is enabled for the signed
-    `trixie` distribution with our keyring, `apt-get update` inside the
-    container reads `https://archive.keellinux.org` and says nothing that means
-    it could not verify the signature, and `apt-get upgrade` installs a newer
-    project package from it. The third of those says so and fails when the
-    archive has nothing newer than the image, rather than passing quietly:
-    a proof that passes when there is nothing to upgrade proves nothing.
+12. **The update path**, in three steps, none of which needs a newer version to
+    exist on the day the test runs. The shipped `keel.sources` is enabled for
+    the signed `trixie` distribution with our keyring; `apt-get update` inside
+    the container reads `https://archive.keellinux.org` and says nothing that
+    means it could not verify the signature; `apt-cache policy inithooks` shows
+    our archive as the source of the candidate, at the 1001 the appliance's own
+    pin file sets; and `apt-get install keel-transition`, a project package the
+    image has not got, fetches it from our archive, verifies it and installs
+    it, with dpkg reporting it configured afterwards. apt refuses an
+    unverifiable archive before it downloads anything, so the last one is the
+    signature check passing on the bytes that were installed and not only on an
+    index.
 13. `keel diff --root <rootfs> --spec tests/instance.yaml`; exit 0 or 13 (no
     drift) passes.
 
-### Measured on the build host, 2026-09-27
+### Measured against the published layer, 2026-09-27
 
-Against the layer the mirror now serves, in a container on `lxcbr0`:
+On the build host, in a container on `lxcbr0`, with `--layers-dir
+https://mirror.keellinux.org/layers`, so the chain under test is the one the
+mirror serves:
 
 ```
-boot-test: container address fc42:5009:ba4b:5ab0:1077:7a5a:c6fb:6038
+boot-test: container address fc42:5009:ba4b:5ab0:...
 boot-test: first boot finished
 boot-test: port 443 answered 200, title 'Keel WordPress boot test'
 boot-test: port 80 answered 200, title 'Keel WordPress boot test'
@@ -147,7 +154,12 @@ boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
 boot-test: a wrong password was refused
 boot-test: https://archive.keellinux.org trixie is enabled and verified with /usr/share/keyrings/keel-archive-keyring.gpg
 boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
+boot-test: apt takes inithooks from https://archive.keellinux.org at priority 1001, candidate 2.3.6+keel5
+boot-test: keel-transition is not in the image, which is what makes the next step a proof
+boot-test: apt fetched, verified and installed keel-transition 0.1.1 from https://archive.keellinux.org
 diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+keel diff: no drift, but a declared field could not be observed offline
+boot-test: wordpress boot test passed
 ```
 
 Every first boot hook from `01ipconfig` to `98finalize` completed, including
@@ -157,12 +169,3 @@ The one `unknown` is `network.interfaces.eth0.ipv6.method`, declared `auto`:
 `inet6 dhcp` is written for `auto` and for `dhcp` alike and there is no lease to
 read offline, which is the documented limitation the other appliances record
 too. Exit 13, which the shared verdict reads as no drift.
-
-**The upgrade proof is the one step that has not run green yet**, and not
-because of the appliance: the archive still offers `keel-archive-keyring 0.1.0`
-and `inithooks 2.3.6+keel4`, while the image carries `0.1.1` and `+keel4`. The
-two package versions that close it are built and waiting in
-`/srv/keel-apt/incoming` on the build host (`keel-archive-keyring 0.1.1`, the
-rotated key, and `inithooks 2.3.6+keel5`, the log level fix). Once they are
-included into `trixie` the proof runs with no change here; `COVERAGE.md` records
-what the verdict said in the meantime.

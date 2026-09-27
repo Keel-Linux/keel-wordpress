@@ -132,16 +132,28 @@ What our archive updates, and what it does not
 The appliance ships ``/etc/apt/sources.list.d/keel.sources`` **enabled** for
 the signed ``trixie`` distribution of ``https://archive.keellinux.org``, with
 ``Signed-By`` naming ``/usr/share/keyrings/keel-archive-keyring.gpg`` from the
-``keel-archive-keyring`` package. So, in a booted appliance::
+``keel-archive-keyring`` package, and ``/etc/apt/preferences.d/keel`` pins that
+origin at 1001. So on a booted appliance::
 
-    apt-get update      # verifies the archive's signature
-    apt-get upgrade     # installs newer Debian and newer project packages
+    apt-get update      # reads our archive and verifies its signature
+    apt-get upgrade     # takes newer Debian and newer project packages
+    apt-get install keel-transition   # installs a project package from us
 
 covers two things:
 
 - **the system**, from Debian and Debian security, as any Debian machine does;
 - **the project's own packages**: ``inithooks``, ``confconsole``, ``keel``,
-  ``keel-archive-keyring``.
+  ``keel-archive-keyring``, ``keel-transition``, ``fab``.
+
+The boot test proves that path rather than proving that a newer version
+happens to exist on the day it runs. It asserts that ``apt-get update``
+verifies our archive's signature, that ``apt-cache policy`` shows a project
+package the image carries with our archive as the source of its candidate at
+that pin priority, and that ``apt-get install`` of ``keel-transition``, which
+the image does not carry, fetches it from our archive, verifies it and
+installs it. apt refuses an unverifiable archive before it downloads anything,
+so the third one is the signature check passing on the bytes that were
+installed and not only on an index.
 
 It does **not** cover WordPress core, and saying otherwise would be a lie in
 the documentation. Nobody packages WordPress for Debian and we do not package
@@ -156,8 +168,14 @@ which runs ``wp core update``, verifies WordPress's checksums again and puts
 the ownership boundary back: core and ``wp-config.php`` root owned, and only
 ``wp-content/uploads``, ``cache``, ``upgrade``, ``plugins`` and ``themes``
 writable by the web server. Automatic core updates are off in
-``wp-config.php`` for the same reason: a supervised update keeps that boundary,
-an unsupervised one does not.
+``wp-config.php`` for the same reason: a supervised update keeps that
+boundary, an unsupervised one does not.
+
+One consequence of the pin worth knowing, because it is a priority that
+downgrades as well as upgrades: an image must not carry a project package that
+the signed archive has not got. If it does, ``apt-get upgrade`` replaces the
+newer installed package with the archive's older one. The boot test's policy
+check is where that shows up.
 
 Plugins and themes are WordPress's business and are installed through
 WordPress. Those two directories are deliberately web writable, which means

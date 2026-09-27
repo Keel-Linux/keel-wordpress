@@ -10,7 +10,7 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | --- | --- | --- | --- |
 | `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (40 tests) | 99.00 percent (99/100) under kcov | every function and every branch |
 | `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (29 tests) | 97.73 percent (43/44) under kcov | the hook itself, run for real |
-| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (57 tests) | 98.75 percent (237/240) under kcov | parsing, addresses, deadlines, the container marks, every verdict |
+| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (64 tests) | 98.82 percent (251/254) under kcov | parsing, addresses, deadlines, the container marks, every verdict |
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (12 tests) | 100 percent (24/24) under kcov | every way it enables and every way it refuses |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (13 tests) | 100 percent (29/29) under kcov | shared with keel-nodebb, where the pattern is maintained |
 | `bin/keel-archive-check` | `tests/archive-check.bats` (8 tests) | 100 percent (26/26) under kcov | same |
@@ -19,8 +19,8 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the six measured shell files: **98.92 percent (458/463)**, 159 bats
-tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
+Total over the six measured shell files: **98.95 percent (472/477)**, 166 bats
+tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
 
@@ -29,7 +29,7 @@ sets to **97**, the lowest measured file. It is only ever raised (decision
       99.00  99/100  wordpress.sh
      100.00  24/24  zzz-keel-archive
       97.73  43/44  40wordpress
-      98.75  237/240  boot-test-lib.sh
+      98.82  251/254  boot-test-lib.sh
      100.00  29/29  zz-project-packages
      100.00  26/26  keel-archive-check
 
@@ -78,10 +78,10 @@ published layer from `https://mirror.keellinux.org/layers`, verifies it,
 assembles it, boots it in LXC and runs `tests/boot-test.sh`. Nothing is built
 there.
 
-### What the boot test proved on the build host, 2026-09-27
+### What the boot test proved against the published layer, 2026-09-27
 
-Against the published chain (`core` `7acf2c53`, `mariadb` `0adca434`,
-`wordpress`), in a container on `lxcbr0`, every first boot hook from
+Against the chain the mirror serves (`core` `7acf2c53`, `mariadb` `0adca434`,
+`wordpress` `c9e33fa1`), in a container on `lxcbr0`, every first boot hook from
 `01ipconfig` to `98finalize` completed, including `35mysqlpass` of the parent
 layer and `40wordpress`:
 
@@ -98,7 +98,11 @@ boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
 boot-test: a wrong password was refused
 boot-test: https://archive.keellinux.org trixie is enabled and verified with /usr/share/keyrings/keel-archive-keyring.gpg
 boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
+boot-test: apt takes inithooks from https://archive.keellinux.org at priority 1001, candidate 2.3.6+keel5
+boot-test: keel-transition is not in the image, which is what makes the next step a proof
+boot-test: apt fetched, verified and installed keel-transition 0.1.1 from https://archive.keellinux.org
 diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+boot-test: wordpress boot test passed
 ```
 
 The one `unknown` is `network.interfaces.eth0.ipv6.method`, declared `auto`:
@@ -106,45 +110,50 @@ The one `unknown` is `network.interfaces.eth0.ipv6.method`, declared `auto`:
 read offline, which is the documented limitation the other appliances record
 too. Exit 13, which the shared verdict reads as no drift.
 
-### The one step that has not run green, and why it is not the appliance
+### How the update half is proved, and how it was proved wrong first
 
-`apt-get upgrade` installing a newer project package. The appliance carries
-`keel-archive-keyring 0.1.1` and `inithooks 2.3.6+keel4`; the archive offers
-`0.1.0` and `+keel4`, so there is nothing newer to upgrade to and the verdict
-says exactly that rather than passing quietly:
+The first version of this test required the archive to offer a **newer**
+version of a package the image carries. That is not a property of the
+appliance. It is a property of what the archive holds on the day the test
+runs, and the only two ways to keep it true are to invent a release or to ship
+the image deliberately stale so the archive is always ahead. Both would be
+lies told to make a test pass.
+
+The second is also dangerous here, and measuring it is what settled the
+argument. `/etc/apt/preferences.d/keel` pins our origin at **1001**, the
+priority that downgrades as well as upgrades. With the image one release ahead
+of the archive:
 
 ```
-boot-test: the archive offers keel-archive-keyring 0.1.0, which is not newer than 0.1.1
+Installed: 0.1.1
+Candidate: 0.1.0
+The following packages will be DOWNGRADED:
+  keel-archive-keyring
 ```
 
-Two package versions close it and both are built and waiting in
-`/srv/keel-apt/incoming` on the build host:
+and `keel-archive-keyring 0.1.0` ships only the **revoked** signing subkey
+`694DE5E8`, so the appliance would have lost the ability to verify the archive
+at all. The rule that follows is the one the policy check now guards: **an
+image must not carry a project package the signed archive has not got.**
 
-- **`keel-archive-keyring 0.1.1`** (from `keel-transition` `0.1.1`, merged on
-  `main`, never built until tonight). This one is not cosmetic: `0.1.0` ships
-  only the **revoked** signing subkey `694DE5E8`, so `gpgv` answers `Can't
-  check signature: No public key` against the live archive and an appliance
-  carrying it could not verify anything. `0.1.1` carries the current subkey
-  `03041024F4B2C0C2F42DDDEA04906EAB77513310` and verifies the archive's
-  `InRelease` with a good signature. It was published to `trixie-staging`,
-  which is why the layer was rebuilt and now carries it; it has not been
-  included into the signed `trixie`.
-- **`inithooks 2.3.6+keel5`**, merged on `master` on 2026-09-27 at 03:23 and
-  never built: the fix for "a log line must never be able to kill the job"
-  (docs/traps.md), which is the hook that renders the conf dying when both
-  candidate description paths exist. The archive still offers `+keel4`.
+So the test asserts the path instead of the increment, and all three are true
+today: `apt-get update` verifies the archive's signature; `apt-cache policy`
+shows a project package the image carries with our archive as the source of
+its candidate, at the appliance's own pin priority; and `apt-get install
+keel-transition`, a project package the image has not got, fetches, verifies
+and installs from our archive. apt refuses an unverifiable archive before it
+downloads anything, so the last one is the signature check passing on the
+bytes that were installed and not only on an index.
 
-Including those two into `trixie` needs `bin/publish` on the build host, which
-is the archive publication step. Once they are there the proof runs with no
-change to this repository.
+Two packages were built and published along the way, both merged work that had
+never reached a machine, which is the trap docs/traps.md records:
+`keel-archive-keyring 0.1.1` with the rotated key, and `inithooks
+2.3.6+keel5`, the fix for a log line killing the hook that renders the conf.
 
 ## Plan
 
-- Include the two packages above into `trixie` and rerun the boot test, so
-  `apt-get upgrade` is proved and not only `apt-get update`.
-- Require `tests / coverage` and `package / changelog` on `master`, and
-  `appliance / build-and-boot` once it has run green against the published
-  layer.
+- Require `tests / coverage`, `package / changelog` and
+  `appliance / build-and-boot` on `master`.
 - Rebuild on the `apache-php` layer when it lands, which changes the parent and
   the digest and nothing else here.
 - Measure `conf.d/main`. A build time script that runs inside a chroot as root
