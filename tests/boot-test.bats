@@ -491,6 +491,42 @@ EOF
     [[ "$output" == *"is enabled and verified with"* ]]
 }
 
+@test "build_leftovers_verdict passes on an image that kept none of them" {
+    run bt_build_leftovers_verdict "$S/rootfs"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no build time package source, archive copy or staging keyring"* ]]
+}
+
+@test "build_leftovers_verdict names the archive copy the image kept" {
+    mkdir -p "$S/rootfs/srv/keel-apt/repo"
+    run bt_build_leftovers_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"still carries the build time /srv/keel-apt"* ]]
+}
+
+@test "build_leftovers_verdict names the source entry the image kept" {
+    install -D /dev/null "$S/rootfs/etc/apt/sources.list.d/keel-staging.list"
+    run bt_build_leftovers_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"keel-staging.list"* ]]
+}
+
+@test "build_leftovers_verdict names the staging keyring the image kept" {
+    install -D /dev/null "$S/rootfs/etc/apt/keyrings/keel-staging-keyring.asc"
+    run bt_build_leftovers_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"keel-staging-keyring.asc"* ]]
+}
+
+@test "build_leftovers_verdict reports every one of them, not only the first" {
+    mkdir -p "$S/rootfs/srv/keel-apt"
+    install -D /dev/null "$S/rootfs/etc/apt/sources.list.d/keel-staging.list"
+    install -D /dev/null "$S/rootfs/etc/apt/keyrings/keel-staging-keyring.asc"
+    run bt_build_leftovers_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [ "$(grep -c 'still carries the build time' <<< "$output")" -eq 3 ]
+}
+
 @test "sources_verdict refuses a disabled source, a staging suite, another archive and another keyring" {
     _sources https://archive.keellinux.org trixie no
     run bt_sources_verdict "$S/keel.sources"

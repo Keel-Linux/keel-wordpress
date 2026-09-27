@@ -23,6 +23,7 @@ KEEL_KEYRING="${KEEL_KEYRING:-/usr/share/keyrings/keel-archive-keyring.gpg}"
 KEEL_ARCHIVE_URI="${KEEL_ARCHIVE_URI:-https://archive.keellinux.org}"
 KEEL_ARCHIVE_SUITE="${KEEL_ARCHIVE_SUITE:-trixie}"
 KEEL_STAGING_LIST="${KEEL_STAGING_LIST:-/etc/apt/sources.list.d/keel-staging.list}"
+KEEL_STAGING_KEYRING="${KEEL_STAGING_KEYRING:-/etc/apt/keyrings/keel-staging-keyring.asc}"
 
 fatal() {
     echo "fatal [zzz-keel-archive]: $*" >&2
@@ -37,9 +38,14 @@ field() {
 [ -f "$KEEL_SOURCES" ] || fatal "$KEEL_SOURCES is not in the image"
 [ -s "$KEEL_KEYRING" ] || fatal "$KEEL_KEYRING is missing or empty: the plan asks for keel-archive-keyring"
 
-# The build time source must be gone before this one is enabled.
+# The build time source must be gone before this one is enabled, and so must
+# the keyring the build verified it with: the staging key signs whatever the
+# build host produced, so an image that kept it would carry trust in a nightly
+# (tracker#7).
 [ ! -e "$KEEL_STAGING_LIST" ] \
     || fatal "$KEEL_STAGING_LIST is still in the image: conf.d/zz-project-packages did not run"
+[ ! -e "$KEEL_STAGING_KEYRING" ] \
+    || fatal "$KEEL_STAGING_KEYRING is still in the image: the staging key must not reach an appliance"
 
 # Never the unsigned staging distribution: it exists only inside a build.
 suite=$(field Suites "$KEEL_SOURCES")
