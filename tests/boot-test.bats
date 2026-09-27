@@ -551,7 +551,9 @@ EOF
     [[ "$output" == *"nothing newer to upgrade to"* ]]
     run bt_upgrade_available_verdict keel-archive-keyring 0.1.1 0.1.0
     [ "$status" -eq 1 ]
-    [[ "$output" == *"is not newer than"* ]]
+    [[ "$output" == *"which is newer"* ]]
+    # and it says what that costs, because the pin at 1001 downgrades
+    [[ "$output" == *"apt-get upgrade would replace"* ]]
     run bt_upgrade_available_verdict keel-archive-keyring "" 0.1.1
     [ "$status" -eq 1 ]
 }

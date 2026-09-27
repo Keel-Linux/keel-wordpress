@@ -549,7 +549,11 @@ bt_upgrade_available_verdict() {
         return 1
     fi
     if ! dpkg --compare-versions "$candidate" gt "$installed"; then
-        echo "boot-test: the archive offers $package $candidate, which is not newer than $installed" >&2
+        echo "boot-test: the archive offers $package $candidate and the image carries" \
+            "$installed, which is newer. This is not only a proof that cannot be made:" \
+            "/etc/apt/preferences.d/keel pins this origin at 1001, which is the priority" \
+            "that downgrades, so apt-get upgrade would replace the installed package with" \
+            "the archive's older one. Publish $installed to the archive." >&2
         return 1
     fi
     echo "boot-test: $package $installed is installed and $BT_ARCHIVE_URI offers $candidate"
