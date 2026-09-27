@@ -17,14 +17,14 @@ permissions:
 
 jobs:
   tests:
-    # tests/coverage.sh measures five shell files (COVERAGE.md). The threshold
+    # tests/coverage.sh measures six shell files (COVERAGE.md). The threshold
     # is the lowest of them and is only ever raised (decision 0006). This job
     # produces the check "tests / coverage", the required status on master. The
     # job id is part of that name, so renaming it silently detaches the
     # protection rule.
     uses: keel-linux/.github/.github/workflows/test-shell.yml@main
     with:
-      threshold: 95
+      threshold: 97
   appliance:
     # The boot test (org-plan section 1): the wordpress layer is fetched from
     # https://mirror.keellinux.org/layers, verified, assembled into a scratch
