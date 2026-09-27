@@ -121,13 +121,14 @@ else
     echo "WordPress installed: '$site_title' at $site_url, administrator '$admin_user'"
 fi
 
-# The declared administrator password, from the environment.
-WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" wp eval '
-    $user = get_user_by("login", getenv("WP_KEEL_USER"));
-    if (!$user) { fwrite(STDERR, "no such user\n"); exit(1); }
-    wp_set_password(getenv("WP_KEEL_PASS"), $user->ID);
-    clean_user_cache($user->ID);
-' || fatal "cannot set the password of '$admin_user'"
+# The declared administrator password, and then the site's own answer to
+# whether that password works. Both are PHP beside this file rather than PHP
+# inside it: a quoted snippet is not shell, so nothing can lint it and no
+# coverage tool can say whether it ran. The passwords go through the
+# environment in both calls.
+WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
+    wp eval-file "$INITHOOKS_PATH/lib/wordpress-set-password.php" \
+    || fatal "cannot set the password of '$admin_user'"
 
 wp option update admin_email "$admin_email" > /dev/null \
     || fatal "cannot set the administrator address"
@@ -135,12 +136,9 @@ wp option update admin_email "$admin_email" > /dev/null \
 # Assert the behaviour, not the file: the account is asked to authenticate
 # with the declared password, and with a wrong one too, so a check that would
 # accept anything cannot pass.
-WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" wp eval '
-    $ok = wp_authenticate(getenv("WP_KEEL_USER"), getenv("WP_KEEL_PASS"));
-    if (is_wp_error($ok)) { fwrite(STDERR, $ok->get_error_message() . "\n"); exit(1); }
-    $bad = wp_authenticate(getenv("WP_KEEL_USER"), getenv("WP_KEEL_PASS") . "-wrong");
-    if (!is_wp_error($bad)) { fwrite(STDERR, "a wrong password was accepted\n"); exit(1); }
-' || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
+WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
+    wp eval-file "$INITHOOKS_PATH/lib/wordpress-verify-login.php" \
+    || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
 
 # The web server serves the site from now on. It is started rather than
 # assumed, because nothing before this hook needed it.

@@ -80,11 +80,10 @@ if [ "\$first" = core ]; then
     esac
 fi
 [ "\${WP_TEST_FAIL:-}" = "\$first" ] && exit 1
-if [ "\$first" = eval ]; then
-    : \${WP_TEST_EVAL_SEEN:=0}
+if [ "\$first" = eval-file ]; then
     if [ "\${WP_TEST_FAIL_EVAL:-}" = both ]; then exit 1; fi
     if [ "\${WP_TEST_FAIL_EVAL:-}" = auth ]; then
-        case "\$*" in *wp_authenticate*) exit 1 ;; esac
+        case "\$*" in *verify-login*) exit 1 ;; esac
     fi
 fi
 exit 0
@@ -159,13 +158,13 @@ EOF
     [ "$output" = "0" ]
 }
 
-@test "the declared password is set and then authenticated through wp eval" {
+@test "the declared password is set and then authenticated through wp eval-file" {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    run grep -c -- " eval " "$CALLS"
+    run grep -c -- " eval-file " "$CALLS"
     [ "$output" = "2" ]
-    grep -q "wp_set_password" "$CALLS"
-    grep -q "wp_authenticate" "$CALLS"
+    grep -q "wordpress-set-password.php" "$CALLS"
+    grep -q "wordpress-verify-login.php" "$CALLS"
 }
 
 @test "the database is started and waited for before anything is written" {
@@ -248,13 +247,31 @@ EOF
     [ ! -e "$WPROOT/wp-config.php" ]
 }
 
-@test "with a terminal the dialog is asked instead of failing" {
+@test "with a terminal the dialog is asked for each value and the boot goes on" {
     : > "$CONF"
+    # script gives the hook a pty, so [[ -t 0 ]] is true and the dialog branch
+    # is the one taken. The stub answers on stdout, which the hook reads, so
+    # the evidence that it was called is in the call log.
     run script -qec "bash '$HOOK'" /dev/null
-    [[ "$output" == *"wordpress.py"* ]] || skip "no pty available in this environment"
+    [ "$status" -eq 0 ]
     run grep "wordpress.py" "$CALLS"
+    [ "$status" -eq 0 ]
     [[ "$output" == *"APP_PASS"* ]]
     [[ "$output" == *"DB_PASS"* ]]
+    # and what the dialog answered is what reached wp-config.php
+    grep -q "define('DB_PASSWORD', 'asked-DB_PASS');" "$WPROOT/wp-config.php"
+}
+
+@test "a dialog that answers nothing is fatal rather than installing without a password" {
+    : > "$CONF"
+    cat > "$IH/bin/wordpress.py" <<EOF
+#!/bin/bash
+echo "wordpress.py \$*" >> "$CALLS"
+EOF
+    chmod +x "$IH/bin/wordpress.py"
+    run script -qec "bash '$HOOK'" /dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no password given"* ]]
 }
 
 @test "a missing conf file is not fatal on its own" {
