@@ -10,7 +10,7 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | --- | --- | --- | --- |
 | `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (40 tests) | 99.00 percent (99/100) under kcov | every function and every branch |
 | `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (29 tests) | 97.73 percent (43/44) under kcov | the hook itself, run for real |
-| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (64 tests) | 98.82 percent (251/254) under kcov | parsing, addresses, deadlines, the container marks, every verdict |
+| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (66 tests) | 98.88 percent (264/267) under kcov | parsing, addresses, deadlines, the container marks, every verdict |
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (12 tests) | 100 percent (24/24) under kcov | every way it enables and every way it refuses |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (13 tests) | 100 percent (29/29) under kcov | shared with keel-nodebb, where the pattern is maintained |
 | `bin/keel-archive-check` | `tests/archive-check.bats` (8 tests) | 100 percent (26/26) under kcov | same |
@@ -19,7 +19,7 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the six measured shell files: **98.95 percent (472/477)**, 166 bats
+Total over the six measured shell files: **98.98 percent (485/490)**, 168 bats
 tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
@@ -29,7 +29,7 @@ sets to **97**, the lowest measured file. It is only ever raised (decision
       99.00  99/100  wordpress.sh
      100.00  24/24  zzz-keel-archive
       97.73  43/44  40wordpress
-      98.82  251/254  boot-test-lib.sh
+      98.88  264/267  boot-test-lib.sh
      100.00  29/29  zz-project-packages
      100.00  26/26  keel-archive-check
 
@@ -100,8 +100,11 @@ boot-test: https://archive.keellinux.org trixie is enabled and verified with /us
 boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
 boot-test: apt takes inithooks from https://archive.keellinux.org at priority 1001, candidate 2.3.6+keel5
 boot-test: keel-transition is not in the image, which is what makes the next step a proof
-boot-test: apt fetched, verified and installed keel-transition 0.1.1 from https://archive.keellinux.org
+boot-test: the keel-transition archive is 13836 bytes
+boot-test: apt fetched keel-transition from https://archive.keellinux.org, against the digest of the signed index
+boot-test: apt fetched and reinstalled keel-archive-keyring 0.1.1 from https://archive.keellinux.org, dpkg configured
 diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+boot-test: wordpress boot test passed
 boot-test: wordpress boot test passed
 ```
 
@@ -136,14 +139,24 @@ and `keel-archive-keyring 0.1.0` ships only the **revoked** signing subkey
 at all. The rule that follows is the one the policy check now guards: **an
 image must not carry a project package the signed archive has not got.**
 
-So the test asserts the path instead of the increment, and all three are true
-today: `apt-get update` verifies the archive's signature; `apt-cache policy`
-shows a project package the image carries with our archive as the source of
-its candidate, at the appliance's own pin priority; and `apt-get install
-keel-transition`, a project package the image has not got, fetches, verifies
-and installs from our archive. apt refuses an unverifiable archive before it
-downloads anything, so the last one is the signature check passing on the
-bytes that were installed and not only on an index.
+So the test asserts the path instead of the increment, in four steps that are
+all true today: `apt-get update` verifies the archive's signature;
+`apt-cache policy` shows a project package the image carries with our archive
+as the source of its candidate, at the appliance's own pin priority;
+`apt-get download keel-transition`, a project package the image has not got,
+brings it down from our archive against the digest the signed index carries;
+and `apt-get install --reinstall` of a project package the image has
+downloads it again and puts it through dpkg. apt refuses an archive it cannot
+verify before it asks for a single byte, so the last two are the signature
+reaching real files and not only an index.
+
+They stay inside our archive because of where the gate runs. The first version
+installed `keel-transition` outright, which passed on the build host and
+failed on the CI runner: that host has no IPv4 route out, so a container there
+reaches our archive, which is IPv6, and nothing of Debian's, and
+`keel-transition` also wants `gpgv`, which a Debian 13 image does not carry
+because apt verifies with `sqv`. A step that needs a package from Debian
+measures the runner's network rather than the appliance.
 
 Two packages were built and published along the way, both merged work that had
 never reached a machine, which is the trap docs/traps.md records:
