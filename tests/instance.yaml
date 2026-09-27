@@ -1,0 +1,64 @@
+# Instance description of the boot test (format: docs/spec.md of the keel
+# repository). IPv6 first, address from the bridge, no certificate request.
+#
+# The three passwords are files the test writes into the rootfs before booting,
+# which is the whole point of this test: nothing is typed at the console, the
+# WordPress installer never appears, and after the first boot the administrator
+# logs in over HTTP with exactly the value in etc/keel/secrets/app_password.
+#
+# No app.domain here on purpose. The container's address is not known until it
+# boots, and wp-config.php decides what to serve from the Host header, so the
+# test reaches the site by its IPv6 literal and is not redirected anywhere.
+#
+# This is the throwaway container the gate boots. The description an operator
+# would start from is keel/instance.example.yaml.
+version: 1
+
+instance:
+  hostname: wordpress
+  fqdn: wordpress.example.org
+
+network:
+  # The container's address comes from the bridge, so the host owns the
+  # interface configuration and 01ipconfig writes nothing.
+  managed_by: host
+  interfaces:
+    eth0:
+      ipv6:
+        method: auto
+
+tls:
+  acme:
+    enabled: false
+
+secrets:
+  root_password:
+    file: /etc/keel/secrets/root_password
+  # Renders to DB_PASS: the parent layer's 35mysqlpass gives it to the
+  # 'wordpress' database account and 40wordpress writes it into wp-config.php.
+  db_password:
+    file: /etc/keel/secrets/db_password
+  # Renders to APP_PASS: the WordPress administrator. The boot test logs in
+  # with it.
+  app_password:
+    file: /etc/keel/secrets/app_password
+
+app:
+  email: admin@example.org
+  options:
+    admin_user: admin
+    site_title: Keel WordPress boot test
+    db_user: wordpress
+    db_name: wordpress
+    db_prefix: wp_
+
+hub:
+  api_key: skip
+
+security:
+  alerts: skip
+  # A first boot input, not machine state: 95secupdates installs the pending
+  # security updates once. diff does not compare it.
+  updates_at_first_boot: skip
+
+first_login_wizard: false

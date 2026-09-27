@@ -1,16 +1,42 @@
 #include <turnkey/base>
-#include <turnkey/lamp>
 
-libjs-cropper       /* wordpress dep */
-libjs-jquery        /* wordpress dep */
-libjs-prototype     /* wordpress dep */
-libjs-scriptaculous /* wordpress dep */
-libphp-phpmailer    /* wordpress dep */
-php-gd              /* wordpress dep */
-php-zip             /* wordpress recommends */
-php-imagick         /* wordpress recommends */
-w3m                 /* wordpress recommends */
+/* The database, which the parent layer already carries: fab-plan-resolve
+   keeps a package the parent installed at the parent's version, so naming
+   them here costs nothing and makes the recipe buildable on its own. */
+#include <turnkey/mysql>
+mariadb-client
 
-php-curl            /* needed by some plugins */
+/* Apache and PHP, which is what this layer adds. turnkey/lamp is not
+   included: it brings Adminer, which this appliance does not use (Makefile). */
+apache2
+libapache2-mod-php
+libapache2-mod-security2
+libapache2-mod-evasive
+php-cli
+php-mysql
+webmin-apache
+webmin-phpini
 
-unzip               /* most wordpress plugins and themes are zip archives */
+/* WordPress: what it needs, and what it recommends and is worth having */
+php-gd              /* image resizing, the media library */
+php-zip             /* plugin and theme archives */
+php-imagick         /* better image handling than gd alone */
+php-curl            /* the update check, and most plugins */
+php-xml             /* feeds, oEmbed, the site health report */
+php-mbstring        /* anything not ASCII */
+php-intl            /* locales and dates */
+libjs-cropper       /* the media cropper */
+libjs-jquery
+unzip               /* most plugins and themes are zip archives */
+curl
+w3m                 /* the text browser the update tooling uses */
+
+/* project packages, resolved from the build host's staging repository.
+   keel-archive-keyring is new here: it carries the key that our own APT
+   archive is signed with, which is what lets a booted appliance run
+   "apt-get update" against archive.keellinux.org and verify what it gets
+   (conf.d/zzz-keel-archive, README.rst). */
+inithooks
+confconsole
+keel
+keel-archive-keyring

@@ -1,0 +1,69 @@
+# Tests of the keel-wordpress appliance recipe (decision 0006 point 4):
+#   tests:     the first boot library, the first boot hook, the boot test
+#              library and the two build time scripts, under bats and kcov on
+#              hosted runners, threshold committed here
+#   appliance: fetch the published layer, verify it, assemble it, boot it in
+#              LXC and prove the install, the login and the update path over
+#              IPv6, on the self-hosted runner
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # tests/coverage.sh measures six shell files (COVERAGE.md). The threshold
+    # is the lowest of them and is only ever raised (decision 0006). This job
+    # produces the check "tests / coverage", the required status on master. The
+    # job id is part of that name, so renaming it silently detaches the
+    # protection rule.
+    uses: keel-linux/.github/.github/workflows/test-shell.yml@main
+    with:
+      threshold: 97
+  appliance:
+    # The boot test (org-plan section 1): the wordpress layer is fetched from
+    # https://mirror.keellinux.org/layers, verified, assembled into a scratch
+    # rootfs, booted in LXC and checked by tests/boot-test.sh. Nothing is built
+    # there; the build host publishes the layer (docs/releases-host.md of the
+    # keel repository).
+    #
+    # test-appliance.yml targets the labels "self-hosted, keel-lxc"; a job aimed
+    # at a label no runner carries stays queued until GitHub cancels it after 24
+    # hours, so the reusable workflow's contract is that callers gate on the
+    # organization variable KEEL_LXC_RUNNER (docs/ci-cd.md section 5 of the keel
+    # repository). This job produces the check "appliance / build-and-boot".
+    if: vars.KEEL_LXC_RUNNER == 'true'
+    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
+    with:
+      appliance: wordpress
+      # The delta is built on the mariadb layer; the workflow checks this
+      # against the parent the published manifest records. It becomes
+      # apache-php when that layer lands, and the layer is rebuilt then.
+      parent: mariadb
+      timeout: 60
+  package:
+    # Only on a pull request. require-changelog compares the two commits of the
+    # pull request, which it reads from github.event.pull_request.base.sha;
+    # outside a pull request that is empty and the script is handed one
+    # argument instead of two, so every push to the default branch failed the
+    # check. A job whose condition is false is reported as skipped, which
+    # satisfies a required status, so protection keeps working and the check is
+    # still a real run on the pull request itself, which is the only place it
+    # can say anything.
+    if: github.event_name == 'pull_request'
+    # This recipe has no debian/changelog: what bt-layer records in the
+    # manifest is the top entry of ./changelog, which is also what
+    # make-release-deb.py turns into the release package. So that is the file a
+    # change which ships has to bump. This job produces the check
+    # "package / changelog".
+    uses: keel-linux/.github/.github/workflows/require-changelog.yml@main
+    with:
+      changelog: changelog
+      # keel/ is the example instance description, which the layer does not
+      # ship; the rest is the reusable workflow's own default.
+      exempt: '^(tests/|docs/|\.github/|keel/|README|COVERAGE\.md|LICENSE|\.gitignore|\.art/)'

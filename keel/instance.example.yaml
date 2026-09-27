@@ -1,0 +1,83 @@
+# Instance description of a WordPress appliance, IPv6 first (docs/spec.md in
+# the keel repository). Copy to /etc/keel/instance.yaml and create the three
+# secret files (mode 0600, owned by root) before the first boot:
+#
+#   /etc/keel/secrets/root_password
+#   /etc/keel/secrets/db_password     the WordPress database account
+#   /etc/keel/secrets/app_password    the WordPress administrator
+#
+# Leave any of the last two out and the first boot has nothing to install with:
+# on a headless machine firstboot.d/40wordpress says which field to declare and
+# fails, and the appliance is left with no wp-config.php and a database account
+# that authenticates nothing, which is the state the layer is published in. The
+# installer is never offered instead, because an appliance reached over the
+# network with an open WordPress installer is somebody else's WordPress.
+version: 1
+
+instance:
+  hostname: wordpress
+  fqdn: wordpress.example.org
+
+network:
+  # LXC: the host owns eth0 and the address comes by SLAAC from the host's
+  # /64. Switch to method static with an address once a DNS record points at
+  # it, so the address the record names never moves.
+  managed_by: host
+  interfaces:
+    eth0:
+      ipv6:
+        method: auto
+
+tls:
+  acme:
+    # The appliance terminates TLS itself with the certificate core ships and
+    # 15regen-sslcert replaces on the first boot, which is self signed. Set
+    # this to true, with the domain below resolving to this machine, to have
+    # confconsole request a real one; or leave it false and put a reverse
+    # proxy in front, in which case that proxy sends X-Forwarded-Proto and
+    # wp-config.php believes it.
+    enabled: false
+    challenge: http-01
+    domains:
+      - wordpress.example.org
+
+secrets:
+  root_password:
+    file: /etc/keel/secrets/root_password
+  # Reaches the database. It renders to DB_PASS, which the parent layer's
+  # firstboot.d/35mysqlpass gives to the account named in app.options.db_user,
+  # and which firstboot.d/40wordpress then writes into wp-config.php.
+  db_password:
+    file: /etc/keel/secrets/db_password
+  # The WordPress administrator's password. It renders to APP_PASS.
+  app_password:
+    file: /etc/keel/secrets/app_password
+
+app:
+  # The administrator's address, and the domain recorded at install time. What
+  # the site actually answers on is decided per request from the Host header
+  # (wp-config.php), so this domain only matters to WP-CLI and to wp-cron and
+  # the appliance is reachable by its address before any name exists.
+  email: admin@example.org
+  domain: wordpress.example.org
+  options:
+    # The WordPress account, and the title the installer would have asked for.
+    admin_user: admin
+    site_title: WordPress
+    # The database account. The same field the parent layer reads to decide
+    # whose password DB_PASS is, which is why one declaration serves both.
+    db_user: wordpress
+    db_name: wordpress
+    db_prefix: wp_
+
+hub:
+  api_key: skip
+
+security:
+  alerts: skip
+  # A first boot input, not machine state: whether 95secupdates installs the
+  # pending security updates once. The appliance keeps them current either way,
+  # through the archive README.rst describes.
+  updates_at_first_boot: skip
+
+first_login_wizard: false

@@ -1,126 +1,199 @@
 #!/bin/bash -ex
+# WordPress under /var/www/wordpress, Apache serving it on both ports, and an
+# empty database waiting for a password nobody has chosen yet.
+#
+# What this script deliberately does NOT do, and what upstream's does: run the
+# installation. Upstream's conf.d/main creates the database user with
+# DB_PASS=turnkey, installs WordPress with ADMIN_PASS=turnkey and leaves both
+# in the image. A layer is built once and reused by every machine built on it,
+# so a password chosen here is the same password everywhere, and a random one
+# would make the layer irreproducible (brief section 5.4: same commit plus
+# same manifest, same bytes). So the installation happens on the first boot,
+# from the instance description, in overlay firstboot.d/40wordpress, and this
+# script leaves the machine in the one state that cannot leak: a database
+# account that authenticates nothing and no wp-config.php at all.
+#
+# Common has already run (COMMON_CONF of the mk files the Makefile includes):
+# turnkey.d, then apache-vhost, apache-headers, apache-security and
+# apache-ssl, then php, then mysql. So mod_ssl, mod_headers, mod_security2 and
+# mod_evasive are enabled, the hardened cipher list is in
+# mods-available/ssl.conf, php.ini carries the PHP_* of the Makefile, and the
+# database has had its anonymous users and its test database removed.
 
 WPROOT=/var/www/wordpress
-USER=www-data
+WEB_USER=www-data
+# WordPress is not a Debian package and is not in our archive, so the release
+# is pinned by digest and verified twice: against this digest, and against
+# WordPress's own per file checksums.
 WP_VERSION=7.1
 WP_ARCHIVE_SHA256=d1ae02b5ae18428031ffc3943659fa87ab361d827f4aa804adf9276e4dc75df6
 WP_CLI_VERSION=2.12.0
 WP_CLI_SHA256=ce34ddd838f7351d6759068d09793f26755463b4a4610a5a5c0a97b68220d85c
 WP_COMPLETION_SHA256=443ca0610ccae8d2d6aceba0ec4aa7929b87ed6cf54f666afed18d663a18a395
 
-DB_USER=wordpress
+# The database and the account that reaches it. Both names are the defaults of
+# overlay/usr/lib/inithooks/lib/wordpress.sh, and both are overridable per
+# instance through app.options.db_name and app.options.db_user.
 DB_NAME=wordpress
-DB_PREFIX=wp_
-#DB_PASS=$(mcookie)
-DB_PASS=turnkey
+DB_USER=wordpress
+# No input hashes to this value, so the account authenticates nothing. This is
+# the documented way to leave a MariaDB account unusable, and it is exactly
+# what the parent layer does with its own administrative account;
+# firstboot.d/35mysqlpass of that layer replaces it with the declared
+# secrets.db_password. MariaDB matches a socket connection against 'localhost'
+# and a TCP connection against the literal address, so these are three
+# accounts and all three are created.
+DB_INVALID_HASH='*THISISNOTAVALIDPASSWORDTHATCANBEUSEDHERE'
+DB_HOSTS="localhost ::1 127.0.0.1"
 
-WP_URL="http://www.example.com"
-ADMIN_USER="admin"
-ADMIN_PASS=turnkey
-ADMIN_MAIL=admin@example.com
+# The build reaches the network through fab's proxy when there is one, and
+# always through the system trust store.
+if [[ -n "$FAB_HTTP_PROXY" ]]; then
+    export http_proxy="$FAB_HTTP_PROXY" https_proxy="$FAB_HTTP_PROXY"
+fi
 
-# update php conf - see Makefile for others
+fatal() { echo "fatal [conf.d/main]: $*" >&2; exit 1; }
+
+# PHP: WordPress reads remote files for the update check and for oEmbed.
 sed -i "s|^allow_url_fopen.*|allow_url_fopen = On|" /etc/php/?.?/apache2/php.ini
+grep -q '^allow_url_fopen = On$' /etc/php/?.?/apache2/php.ini
 
-# Install wp-cli commandline tool
-curl --proto '=https' --tlsv1.2 -fL \
+# wp-cli, pinned and verified. The first boot hook is the only thing that uses
+# it unattended, and a person uses it afterwards through turnkey-wp.
+curl --proto '=https' --tlsv1.2 -fsSL \
     "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar" \
     -o /usr/local/bin/wp
 echo "$WP_CLI_SHA256  /usr/local/bin/wp" | sha256sum --check --strict
-chmod +x /usr/local/bin/wp
-curl --proto '=https' --tlsv1.2 -fL \
+chmod 0755 /usr/local/bin/wp
+mkdir -p /root/.bashrc.d
+curl --proto '=https' --tlsv1.2 -fsSL \
     "https://raw.githubusercontent.com/wp-cli/wp-cli/v${WP_CLI_VERSION}/utils/wp-completion.bash" \
     -o /root/.bashrc.d/wp-completion
 echo "$WP_COMPLETION_SHA256  /root/.bashrc.d/wp-completion" \
     | sha256sum --check --strict
-chmod +x /root/.bashrc.d/wp-completion
+chmod 0644 /root/.bashrc.d/wp-completion
 
-# create the database and user
-service mysql start
-mysqladmin create $DB_NAME
-mysql --batch --execute "grant all privileges on $DB_NAME.* to $DB_USER@localhost identified by '$DB_PASS'; flush privileges;"
-
-# install wordpress
-mkdir -p $WPROOT
-chown -R $USER:$USER $WPROOT
-WP_ARCHIVE=/usr/local/src/wordpress-${WP_VERSION}.zip
-curl --proto '=https' --tlsv1.2 -fL \
-    "https://wordpress.org/wordpress-${WP_VERSION}.zip" \
-    -o "$WP_ARCHIVE"
+# WordPress itself.
+tmp=$(mktemp -d)
+WP_ARCHIVE="$tmp/wordpress-${WP_VERSION}.zip"
+curl --proto '=https' --tlsv1.2 -fsSL \
+    "https://wordpress.org/wordpress-${WP_VERSION}.zip" -o "$WP_ARCHIVE"
 echo "$WP_ARCHIVE_SHA256  $WP_ARCHIVE" | sha256sum --check --strict
+rm -rf "$WPROOT"
+mkdir -p "$(dirname "$WPROOT")"
 unzip -q "$WP_ARCHIVE" -d "$(dirname "$WPROOT")"
-rm -f "$WP_ARCHIVE"
-chown -R "$USER:$USER" "$WPROOT"
-turnkey-wp core verify-checksums --version=$WP_VERSION
-cd $WPROOT
-turnkey-wp config create --dbname="$DB_NAME" \
-                         --dbuser="$DB_NAME" \
-                         --dbpass="$DB_PASS" \
-                         --dbprefix="$DB_PREFIX"
-turnkey-wp core install --url="$WP_URL" \
-                        --title="TurnKey Linux" \
-                        --admin_user="$ADMIN_USER" \
-                        --admin_password="$ADMIN_PASS" \
-                        --admin_email="$ADMIN_MAIL"
+rm -rf "$tmp"
+[ -f "$WPROOT/wp-includes/version.php" ] || fatal "the archive did not unpack to $WPROOT"
+grep -q "wp_version = '${WP_VERSION}" "$WPROOT/wp-includes/version.php" \
+    || fatal "the unpacked tree is not WordPress $WP_VERSION"
+chown -R "$WEB_USER:$WEB_USER" "$WPROOT"
 
-cat >> $WPROOT/wp-config.php <<EOF
+# WordPress's own per file checksums, asked of WordPress. This is the second,
+# independent check on the same bytes: the digest above says the archive is the
+# one we pinned, this says the files in it are the ones WordPress published.
+turnkey-wp core verify-checksums --version="$WP_VERSION"
 
-define('WP_CACHE', true);
-define('DISABLE_WP_CRON', true);
+# No wp-config.php, and none is written here. Assert it, because the whole
+# point of this recipe is that the layer carries no credential.
+[ ! -e "$WPROOT/wp-config.php" ] || fatal "the layer must not carry a wp-config.php"
 
-// WordPress update method
-define('FS_METHOD', 'direct');
-
-// WordPress update policy
-define('AUTOMATIC_UPDATER_DISABLED', false);
-define('WP_AUTO_UPDATE_CORE', false);
-
-// Workaround wp-cli issue with unset HTTP_HOST
-// For more info  see https://github.com/wp-cli/wp-cli/issues/2431 &/or
-// https://make.wordpress.org/cli/handbook/common-issues/#php-notice-undefined-index-on-_server-superglobal
-if ( defined( 'WP_CLI' ) && WP_CLI && ! isset( \$_SERVER['HTTP_HOST'] ) ) {
-    \$_SERVER['HTTP_HOST'] = 'localhost';
-}
+# The database, and the account that cannot log in yet.
+service mysql start
+mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` \
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+for host in $DB_HOSTS; do
+    mysql <<EOF
+CREATE USER IF NOT EXISTS '$DB_USER'@'$host'
+    IDENTIFIED VIA mysql_native_password USING '$DB_INVALID_HASH';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'$host';
 EOF
+done
+mysql -e "FLUSH PRIVILEGES"
 
-# setup apache configuration and complete wordpress installation
-a2dissite 000-default
-a2ensite wordpress
-a2enmod rewrite
+# The database exists, the account exists on every host, and none of them can
+# log in: that is the state this layer is published in.
+mysql -N -B -e "SELECT COUNT(*) FROM information_schema.schemata \
+    WHERE schema_name='$DB_NAME'" | grep -qx 1
+for host in $DB_HOSTS; do
+    mysql -N -B -e "SELECT COUNT(*) FROM mysql.global_priv \
+        WHERE User='$DB_USER' AND Host='$host'" | grep -qx 1
+done
+mysql -N -B -e "SELECT COUNT(*) FROM mysql.global_priv \
+    WHERE User='$DB_USER' AND JSON_VALUE(Priv, '\$.authentication_string') \
+        = '$DB_INVALID_HASH'" | grep -qx 3
+service mysql stop
 
-# edit first post to include useful information
-mysql <<EOF
-USE $DB_NAME;
-UPDATE ${DB_PREFIX}posts SET post_title = 'Welcome to WordPress!' WHERE ID = '1';
-UPDATE ${DB_PREFIX}posts SET post_content = 'Getting started...<ul><li><a href="/wp-login.php">Login</a> as <b>admin</b> and get blogging!</li><li>Refer to the <a href="http://www.turnkeylinux.org/wordpress">TurnKey WordPress release notes</a></li><li>Refer to the <a href="http://codex.wordpress.org/Getting_Started_with_WordPress">Wordpress Getting Started Codex</a></li><li><a href="https://wordpress.org/plugins/">Search WordPress.org for plugins</a> to extend WordPress. Here\'s some examples: <ul>
-<li><a href="https://wordpress.org/plugins/wordpress-seo/">Yoast SEO</a>: Optimizes your WordPress blog for search engines and XML sitemaps.</li>
-<li><a href="https://wordpress.org/plugins/nextgen-gallery/">NextGEN Gallery</a>: Easy to use image gallery with thumbnail & slideshow options.</li>
-<li><a href="https://wordpress.org/plugins/jetpack/">JetPack by WordPress.com</a>: Jetpack adds powerful features previously only available to WordPress.com users including customization, traffic, mobile, content, and performance tools.</li>
-<li><a href="https://wordpress.org/plugins/wp-super-cache/">WP Super Cache</a>: Accelerates your blog by serving 99% of your visitors via static HTML files.</li>
-<li><a href="https://wordpress.org/plugins/ultimate-social-media-icons/">Social Media Share Buttons & Icons</a>: Promote your content by adding links to social sharing and bookmarking sites.</li>
-<li><a href="https://wordpress.org/plugins/simple-tags/">Simple Tags</a>: automatically adds tags and related posts to your content.</li>
-<li><a href="https://wordpress.org/plugins/backupwordpress/">BackupWordPress</a>: easily backup your core WordPress tables.</li>
-<li><a href="https://wordpress.org/plugins/google-analytics-for-wordpress/">Google Analytics Dashboard for WordPress</a>: track visitors, AdSense clicks, outgoing links, and search queries.</li>
-<li><a href="https://wordpress.org/plugins/wp-polls/">WP-Polls</a>: Adds an easily customizable AJAX poll system to your blog.</li>
-<li><a href="https://wordpress.org/plugins/wp-pagenavi/">WP-PageNavi</a>: Adds more advanced paging navigation.</li>
-<li><a href="https://wordpress.org/plugins/ozh-admin-drop-down-menu/">Ozh admin dropdown menu</a>: Creates a drop down menu with all admin links.</li>
-<li><a href="https://wordpress.org/plugins/contact-form-7/">Contact Form 7</a>: Customizable contact forms supporting AJAX, CAPTCHA and Akismet integration.</li>
-<li><a href="https://wordpress.org/plugins/seriously-simple-podcasting/">Seriously Simple Podcasting</a>: Simple Podcasting from your WordPress site.</li>
-</ul></li></ul>' WHERE ID = '1';
-EOF
-
-# Root owns WordPress core and configuration. The web service retains only the
-# documented media and plugin/theme management boundary.
+# Ownership. Core and configuration are root's; the web server keeps only the
+# directories it has to write, which is the boundary README.rst documents.
 chown -R root:root "$WPROOT"
 find "$WPROOT" -type d -exec chmod 0755 {} +
 find "$WPROOT" -type f -exec chmod 0644 {} +
-for runtime_dir in uploads cache upgrade plugins themes; do
-    install -d -o "$USER" -g "$USER" -m 0755 \
-        "$WPROOT/wp-content/$runtime_dir"
-    chown -R "$USER:$USER" "$WPROOT/wp-content/$runtime_dir"
+for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes; do
+    install -d -o "$WEB_USER" -g "$WEB_USER" -m 0755 "$WPROOT/wp-content/$runtime_dir"
+    chown -R "$WEB_USER:$WEB_USER" "$WPROOT/wp-content/$runtime_dir"
 done
-chown root:"$USER" "$WPROOT/wp-config.php"
-chmod 0640 "$WPROOT/wp-config.php"
 
-# stop mysql server
-service mysql stop
+# Apache: this appliance's site replaces the Debian default one.
+a2dissite 000-default
+a2ensite wordpress
+a2enmod rewrite
+[ -L /etc/apache2/sites-enabled/wordpress.conf ] || fatal "the site is not enabled"
+[ ! -e /etc/apache2/sites-enabled/000-default.conf ] || fatal "the default site is still enabled"
+
+# common/conf/apache-ssl substitutes the hardened cipher list from a file
+# common/conf/turnkey.d/zz-ssl-ciphers leaves in /tmp. When that file is
+# missing the substitution silently produces an empty directive, and the
+# appliance ships a web server that will not start. keel-nodebb shipped
+# exactly that with nginx once, so this is asserted rather than assumed.
+SSL_CONF=/etc/apache2/mods-available/ssl.conf
+if grep -q 'ZZ_SSL_CIPHERS' "$SSL_CONF"; then
+    fatal "$SSL_CONF still carries the ZZ_SSL_CIPHERS placeholder"
+fi
+grep -Eq '^SSLCipherSuite +[A-Za-z0-9]' "$SSL_CONF" \
+    || fatal "$SSL_CONF has no cipher suite"
+
+# And the behaviour rather than the settings: Apache is asked whether it would
+# start with this configuration.
+apache2ctl configtest
+
+# fab-plan-resolve keeps a package the parent layer already carries at the
+# parent's version, so the two core packages are upgraded here from the build
+# time source (keel and keel-archive-keyring, new in the plan, were installed
+# from it already).
+#
+# The overlay of this appliance ships /etc/confconsole/services.txt, which is a
+# conffile of confconsole, so dpkg sees it as locally modified and asks what to
+# do with it. The conf script runs with stdin closed, dpkg reads end of file at
+# the prompt and leaves confconsole "install ok unpacked", which fails this
+# script. Keep the overlay's file without asking.
+export DEBIAN_FRONTEND=noninteractive
+apt-get install -y --only-upgrade \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
+    inithooks confconsole
+
+# A half configured package keeps its new version, so check the state too.
+[[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel keel-archive-keyring \
+    | grep -c '^install ok installed$') -eq 4 ]]
+
+# A floor, not a literal: the declarative first boot this appliance depends on
+# landed in these versions, and a build that read a stale index would ship an
+# appliance whose whole point does not work. conf.d/zz-project-packages is
+# where the archive freshness check itself lives; this is the minimum, which is
+# what publishing this layer requires.
+while read -r package floor; do
+    installed=$(dpkg-query -W -f '${Version}' "$package")
+    dpkg --compare-versions "$installed" ge "$floor" \
+        || fatal "$package $installed is older than $floor"
+done <<EOF
+inithooks 2.3.6+keel4
+confconsole 2.2.3+keel2
+keel 0.2.1
+EOF
+dpkg-query -W -f '${Package} ${Version} ${Status}\n' \
+    inithooks confconsole keel keel-archive-keyring
+
+# conf.d/zz-project-packages runs after this script and checks these against
+# the archive the build read, then removes the build time source;
+# conf.d/zzz-keel-archive then enables the signed one. No version is asserted
+# here, because a literal one passes on a stale index.

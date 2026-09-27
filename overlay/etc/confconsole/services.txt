@@ -1,0 +1,11 @@
+Blog:      https://[$ipaddr6]
+Admin:     https://[$ipaddr6]/wp-admin/
+Web shell: https://[$ipaddr6]:12320
+Webmin:    https://[$ipaddr6]:12321
+SSH/SFTP:  root@$ipaddr6 (port 22)
+
+Blog:      https://$ipaddr
+Admin:     https://$ipaddr/wp-admin/
+Web shell: https://$ipaddr:12320
+Webmin:    https://$ipaddr:12321
+SSH/SFTP:  root@$ipaddr (port 22)

@@ -1,113 +1,53 @@
 #!/usr/bin/python3
-"""Set Wordpress admin password and email
+"""Ask for the WordPress values that the inithooks conf did not provide.
 
-Option:
-    --pass=     unless provided, will ask interactively
-    --email=    unless provided, will ask interactively
-    --domain=   unless provided, will ask interactively
+Called by firstboot.d/40wordpress only when a terminal is attached and a value
+is absent; prints one KEY=value line per requested name on stdout so the hook
+keeps the decisions and this file keeps the dialogs. On a headless first boot
+the hook fails instead of calling this, because the values it needs are
+declared: secrets.app_password and secrets.db_password of the instance
+description.
+
+Syntax: wordpress.py NAME [NAME ...]     NAME is APP_PASS or DB_PASS
 """
 
 import sys
-import getopt
-import hashlib
-from typing import Optional, NoReturn
-import subprocess
 
-import inithooks_cache
-from libinithooks.dialog_wrapper import Dialog, validate_domain
-from mysqlconf import MySQL
+from libinithooks.dialog_wrapper import Dialog
 
+TITLE = "Keel - First boot configuration"
 
-DEFAULT_DOMAIN = 'http://www.example.com'
-
-
-def usage(s: Optional[str] | getopt.GetoptError = None) -> NoReturn:
-    std_output = sys.stdout
-    exit_code = 0
-    if s:
-        exit_code = 1
-        std_output = sys.stderr
-        print("Error:", s, file=std_output)
-    print(f"Syntax: {sys.argv[0]} [options]", file=sys.stderr)
-    print(__doc__, file=std_output)
-    sys.exit(exit_code)
+PROMPTS = {
+    "APP_PASS": (
+        "WordPress password",
+        "Enter the password for the WordPress administrator account.",
+    ),
+    "DB_PASS": (
+        "WordPress database password",
+        "Enter the password for the WordPress database account.",
+    ),
+}
 
 
-def main():
-    opts: list[tuple[str, str]] = []
-
+def ask(name: str, dialog: Dialog) -> str:
+    """Ask for one value, by the name the hook uses for it."""
     try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], "h",
-                                       ['help', 'pass=', 'email=', 'domain='])
-    except getopt.GetoptError as e:
-        usage(e)
+        title, text = PROMPTS[name]
+    except KeyError:
+        raise SystemExit(f"wordpress.py: unknown value name {name!r}") from None
+    return dialog.get_password(title, text)
 
-    password = ""
-    email = ""
-    domain = ""
-    for opt, val in opts:
-        if opt in ('-h', '--help'):
-            usage()
-        elif opt == '--pass':
-            password = val
-        elif opt == '--email':
-            email = val
-        elif opt == '--domain':
-            domain = val
 
-    d = Dialog('TurnKey Linux - Configuration')
-    if 'd' not in locals():
-        d = Dialog('TurnKey Linux - First boot configuration')
-
-    if not password:
-        password = d.get_password(
-            "Wordpress Password",
-            "Enter new password for the Wordpress 'admin' account.")
-
-    if not email:
-        email = d.get_email(
-            "Wordpress Email",
-            "Please enter email address for the Wordpress 'admin' account.",
-            "admin@example.com")
-
-    inithooks_cache.write('APP_EMAIL', email)
-
-    scheme = 'https'
-
-    if not domain:
-        scheme, domain = d.get_domain(
-            'WordPress domain',
-            "Enter domain to serve WordPress, if no protocol prefix, will"
-            " assume https.",
-            DEFAULT_DOMAIN)
-    else:
-        domain, scheme, message = validate_domain(domain)
-        if message:
-            print(f"Invalid WordPress domain: {message}", file=sys.stderr)
-            sys.exit(1)
-
-    scheme = scheme or 'https'
-    if scheme not in ('http', 'https'):
-        print(f"Unsupported WordPress URL scheme: {scheme}", file=sys.stderr)
-        sys.exit(1)
-
-    domain = f"{scheme}://{domain}"
-    old_domain = inithooks_cache.read('APP_DOMAIN')
-    if not old_domain:
-        old_domain = DEFAULT_DOMAIN
-
-    subprocess.run(['/usr/local/bin/turnkey-wp', 'search-replace',
-                    old_domain, domain], check=True)
-
-    inithooks_cache.write('APP_DOMAIN', domain)
-
-    assert password is not None
-    hashpass = hashlib.md5(password.encode('utf8')).hexdigest()
-
-    m = MySQL()
-    m.execute('UPDATE wordpress.wp_users SET user_pass=%s WHERE user_nicename="admin";', (hashpass,))
-    m.execute('UPDATE wordpress.wp_users SET user_email=%s WHERE user_nicename="admin";', (email,))
+def main(names: list[str]) -> int:
+    """Print one KEY=value line per requested name."""
+    if not names:
+        print(__doc__, file=sys.stderr)
+        return 1
+    dialog = Dialog(TITLE)
+    for name in names:
+        print(f"{name}={ask(name, dialog)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

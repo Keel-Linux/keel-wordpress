@@ -1,10 +1,149 @@
 #!/bin/bash -e
-# set wordpress admin password and email
+# Complete the WordPress installation from the instance description, so that
+# the installer never appears and nothing about this machine was decided when
+# the layer was built.
+#
+# What it needs and where each value comes from (keel/spec/constants.py of the
+# keel repository is the table that maps a spec field to a variable):
+#
+#   secrets.db_password    -> DB_PASS         the database account's password,
+#                                             already given to the database by
+#                                             the parent layer's 35mysqlpass
+#   secrets.app_password   -> APP_PASS        the WordPress administrator
+#   app.options.admin_user -> APP_ADMIN_USER  that administrator's login
+#   app.options.site_title -> APP_SITE_TITLE  the site title
+#   app.email              -> APP_EMAIL       the administrator's address
+#   app.domain             -> APP_DOMAIN      the recorded site URL
+#   app.options.db_user    -> APP_DB_USER     the database account, the same
+#                                             field the parent layer reads
+#   app.options.db_name    -> APP_DB_NAME     the database
+#
+# Runs at 40, after 35mysqlpass of the parent layer, which starts the database
+# and sets that account's password, and after 15regen-sslcert, which replaces
+# the certificate Apache serves on 443.
+#
+# Neither password is ever an argument of another process. wp-config.php is
+# written by a shell function, and the administrator's password is set through
+# the environment of one wp-cli call, because an argument is readable by every
+# process on the machine for as long as the command runs.
+#
+# Decisions live in lib/wordpress.sh; this file is the part that touches the
+# system, and bin/wordpress.py is the only dialog.
 
-. /etc/default/inithooks
+INITHOOKS_DEFAULT="${INITHOOKS_DEFAULT:-/etc/default/inithooks}"
+# shellcheck source=/etc/default/inithooks
+source "$INITHOOKS_DEFAULT"
+# shellcheck source=../lib/wordpress.sh
+source "$INITHOOKS_PATH/lib/wordpress.sh"
 
-# shellcheck source=/dev/null
-[[ -e $INITHOOKS_CONF ]] && . $INITHOOKS_CONF
+fatal() { echo "fatal [40wordpress]: $*" >&2; exit 1; }
 
-$INITHOOKS_PATH/bin/wordpress.py --pass="$APP_PASS" --email="$APP_EMAIL" \
-                --domain="$APP_DOMAIN"
+if [[ -e "$INITHOOKS_CONF" ]]; then
+    # shellcheck source=/dev/null
+    source "$INITHOOKS_CONF"
+fi
+
+admin_user=$(wordpress_admin_user "${APP_ADMIN_USER-}") \
+    || fatal "'${APP_ADMIN_USER-}' is not a WordPress login this appliance will create"
+admin_email=$(wordpress_admin_email "${APP_EMAIL-}") \
+    || fatal "'${APP_EMAIL-}' is not an email address: declare app.email"
+site_title=$(wordpress_site_title "${APP_SITE_TITLE-}") \
+    || fatal "no site title: declare app.options.site_title"
+site_url=$(wordpress_site_url "${APP_DOMAIN-}") \
+    || fatal "'${APP_DOMAIN-}' is not a domain or a URL: declare app.domain"
+db_user=$(wordpress_db_user "${APP_DB_USER-}") \
+    || fatal "'${APP_DB_USER-}' is not a database account name this appliance will use"
+db_name=$(wordpress_db_name "${APP_DB_NAME-}") \
+    || fatal "'${APP_DB_NAME-}' is not a database name this appliance will use"
+db_prefix=$(wordpress_db_prefix "${APP_DB_PREFIX-}") \
+    || fatal "'${APP_DB_PREFIX-}' is not a table prefix this appliance will use"
+
+mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}")
+if [[ ${#missing[@]} -gt 0 ]]; then
+    [[ -t 0 ]] || fatal "no ${missing[*]} in $INITHOOKS_CONF and no terminal to" \
+        "ask on: declare secrets.app_password and secrets.db_password in the" \
+        "instance description"
+    while IFS='=' read -r key value; do
+        [[ -n "$key" ]] && declare "$key=$value"
+    done < <("$INITHOOKS_PATH/bin/wordpress.py" "${missing[@]}")
+    [[ -n "${APP_PASS-}" && -n "${DB_PASS-}" ]] || fatal "no password given"
+fi
+
+# The database. 35mysqlpass started it and gave this account its password; do
+# not assume either, because a hook that assumes reports somebody else's
+# failure as its own.
+systemctl start "$WORDPRESS_DB_SERVICE.service"
+wordpress_wait_ready "mysqladmin ping" "$WORDPRESS_WAIT_TRIES" \
+    || fatal "$WORDPRESS_DB_SERVICE did not answer after $WORDPRESS_WAIT_TRIES tries"
+MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
+    --protocol=TCP --batch --skip-column-names \
+    --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
+    | grep -qx 1 \
+    || fatal "'$db_user' cannot reach the database '$db_name' on [::1]:3306 with" \
+        "the declared secrets.db_password: see 35mysqlpass above"
+
+# wp-config.php, written once. The password reaches the file as a shell
+# function argument and appears nowhere else; the file is readable by the web
+# server and by nobody else, because PHP has to read it.
+if [[ ! -e "$WORDPRESS_CONFIG" ]]; then
+    tmp=$(mktemp "$WORDPRESS_ROOT/.wp-config.php.XXXXXX") \
+        || fatal "cannot write beside $WORDPRESS_CONFIG"
+    trap 'rm -f "$tmp"' EXIT
+    chmod 0600 "$tmp"
+    wordpress_config_php "$db_name" "$db_user" "$DB_PASS" \
+        "$WORDPRESS_DB_HOST" "$db_prefix" "$site_url" > "$tmp" \
+        || fatal "cannot render wp-config.php"
+    php -l "$tmp" > /dev/null || fatal "the wp-config.php just written is not valid PHP"
+    chown root:"$WORDPRESS_WEB_USER" "$tmp"
+    chmod 0640 "$tmp"
+    mv "$tmp" "$WORDPRESS_CONFIG"
+    trap - EXIT
+    echo "wp-config.php written: database '$db_name' as '$db_user' on" \
+        "$WORDPRESS_DB_HOST, password from DB_PASS $(wordpress_masked "$DB_PASS")"
+fi
+
+wp() {
+    command wp --allow-root --path="$WORDPRESS_ROOT" "$@"
+}
+
+# The installation. An already installed machine is left alone, so the hook
+# can be run again after a failure without losing a site.
+if wp core is-installed > /dev/null 2>&1; then
+    echo "WordPress is already installed; leaving the site alone"
+else
+    mapfile -t install_args < <(wordpress_install_args "$site_url" "$site_title" \
+        "$admin_user" "$admin_email") \
+        || fatal "cannot build the arguments for the installation"
+    # A throwaway password, because this one is an argument. The declared one
+    # is set below, through the environment, before anything can be served.
+    wp "${install_args[@]}" --admin_password="$(openssl rand -base64 30)" \
+        || fatal "wp core install failed"
+    echo "WordPress installed: '$site_title' at $site_url, administrator '$admin_user'"
+fi
+
+# The declared administrator password, and then the site's own answer to
+# whether that password works. Both are PHP beside this file rather than PHP
+# inside it: a quoted snippet is not shell, so nothing can lint it and no
+# coverage tool can say whether it ran. The passwords go through the
+# environment in both calls.
+WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
+    wp eval-file "$INITHOOKS_PATH/lib/wordpress-set-password.php" \
+    || fatal "cannot set the password of '$admin_user'"
+
+wp option update admin_email "$admin_email" > /dev/null \
+    || fatal "cannot set the administrator address"
+
+# Assert the behaviour, not the file: the account is asked to authenticate
+# with the declared password, and with a wrong one too, so a check that would
+# accept anything cannot pass.
+WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
+    wp eval-file "$INITHOOKS_PATH/lib/wordpress-verify-login.php" \
+    || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
+
+# The web server serves the site from now on. It is started rather than
+# assumed, because nothing before this hook needed it.
+systemctl restart "$WORDPRESS_WEB_SERVICE.service" \
+    || fatal "$WORDPRESS_WEB_SERVICE did not start"
+
+echo "WordPress administrator '$admin_user' set from APP_PASS" \
+     "$(wordpress_masked "$APP_PASS"), authenticated against the site itself"

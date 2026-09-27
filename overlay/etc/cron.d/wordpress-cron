@@ -1,2 +1,7 @@
-#!/bin/bash
-*/5 * * * * www-data /usr/bin/curl -A 'Mozilla/5.0' 'http://127.0.0.1/wp-cron.php' >/dev/null 2>&1
+# WordPress runs its scheduled work from cron rather than on page loads:
+# wp-config.php sets DISABLE_WP_CRON. The request goes to the loopback over
+# IPv6 first, which is where Apache listens (::1 and 127.0.0.1 are both up),
+# and the literal address is used because on Debian "localhost" is an IPv4
+# name only (docs/traps.md of the keel repository).
+MAILTO=root
+*/5 * * * * www-data /usr/bin/curl -6 -sS -o /dev/null -A 'Keel-Linux-cron' 'http://[::1]/wp-cron.php' || /usr/bin/curl -4 -sS -o /dev/null -A 'Keel-Linux-cron' 'http://127.0.0.1/wp-cron.php'
