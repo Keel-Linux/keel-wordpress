@@ -89,6 +89,7 @@ setup() {
     [[ "$output" == *"wp-login"* ]] || [[ "$output" == *"logs in"* ]]
     [[ "$output" == *"apt-get update"* ]]
     [[ "$output" == *"apt-get install"* ]]
+    [[ "$output" == *"apt-get download"* ]]
     [[ "$output" == *"apt-cache policy"* ]]
 }
 
@@ -608,16 +609,39 @@ EOF
     [[ "$output" == *"would prove nothing"* ]]
 }
 
-@test "install_verdict passes when apt fetched it from our archive and dpkg configured it" {
+@test "download_verdict passes when apt fetched the deb from our archive" {
     printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
-    run bt_install_verdict keel-transition 0 0.1.1 "install ok installed" "$S/out"
+    printf 'deb bytes' > "$S/pkg.deb"
+    run bt_download_verdict keel-transition 0 "$S/pkg.deb" "$S/out"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"fetched, verified and installed keel-transition 0.1.1"* ]]
+    [[ "$output" == *"fetched keel-transition from https://archive.keellinux.org"* ]]
+}
+
+@test "download_verdict refuses a non zero exit, another archive and a missing file" {
+    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out"
+    printf 'deb bytes' > "$S/pkg.deb"
+    run bt_download_verdict keel-transition 100 "$S/pkg.deb" "$S/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"exited 100"* ]]
+    printf 'Get:1 http://deb.debian.org/debian trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out2"
+    run bt_download_verdict keel-transition 0 "$S/pkg.deb" "$S/out2"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"did not fetch keel-transition from"* ]]
+    run bt_download_verdict keel-transition 0 "$S/nothing.deb" "$S/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"left no file"* ]]
+}
+
+@test "install_verdict passes when apt fetched it from our archive and dpkg configured it" {
+    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-archive-keyring all 0.1.1 [4904 B]\n' > "$S/out"
+    run bt_install_verdict keel-archive-keyring 0 0.1.1 "install ok installed" "$S/out"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"fetched and reinstalled keel-archive-keyring 0.1.1"* ]]
 }
 
 @test "install_verdict refuses a non zero exit" {
     : > "$S/out"
-    run bt_install_verdict keel-transition 100 "" "" "$S/out"
+    run bt_install_verdict keel-archive-keyring 100 "" "" "$S/out"
     [ "$status" -eq 1 ]
     [[ "$output" == *"exited 100"* ]]
 }

@@ -19,8 +19,9 @@
 #      dashboard comes back for the session
 #   6. apt-get update against archive.keellinux.org verifies its signature,
 #      apt takes a project package from that archive at the appliance's own pin
-#      priority, and apt-get install fetches, verifies and installs a project
-#      package the image has not got
+#      priority, a project package the image has not got is fetched from it
+#      against the digest of the signed index, and a project package the image
+#      has is downloaded again and put through dpkg
 #   7. keel diff reports no drift between the spec and the machine
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
@@ -240,20 +241,36 @@ else
     cat "$policy_out"
     bt_policy_verdict "$BT_POLICY_PACKAGE" "$policy_out"
 
-    # And the whole path, end to end, on a project package the image has not
-    # got: apt fetches it from our archive, verifies it and installs it.
-    before=$(inside "dpkg-query -W -f '\${Status}' $BT_ARCHIVE_PACKAGE 2>/dev/null" || true)
-    bt_absent_verdict "$BT_ARCHIVE_PACKAGE" "$before"
+    # A project package the image has not got, fetched from our archive. Both
+    # this and the next step stay inside our archive: the CI runner has no
+    # IPv4 route out, so a step that needed a package from Debian would be
+    # testing the runner's network and not the appliance.
+    before=$(inside "dpkg-query -W -f '\${Status}' $BT_FETCH_PACKAGE 2>/dev/null" || true)
+    bt_absent_verdict "$BT_FETCH_PACKAGE" "$before"
+    fetch_out=$container_dir/apt-download.txt
+    set +e
+    inside "cd /run && rm -f ${BT_FETCH_PACKAGE}_*.deb && apt-get download $BT_FETCH_PACKAGE" \
+        > "$fetch_out" 2>&1
+    fetch_code=$?
+    set -e
+    tail -n 4 "$fetch_out"
+    fetched=$(inside "ls /run/${BT_FETCH_PACKAGE}_*.deb 2>/dev/null | head -1" || true)
+    bt_download_verdict "$BT_FETCH_PACKAGE" "$fetch_code" \
+        "${BT_ROOTFS}${fetched:-/run/nothing}" "$fetch_out"
+    inside "rm -f /run/${BT_FETCH_PACKAGE}_*.deb" || true
+
+    # And the installation half: the same archive, downloaded again and put
+    # through dpkg.
     install_out=$container_dir/apt-install.txt
     set +e
-    inside "DEBIAN_FRONTEND=noninteractive apt-get -y install $BT_ARCHIVE_PACKAGE" \
+    inside "DEBIAN_FRONTEND=noninteractive apt-get -y install --reinstall $BT_INSTALL_PACKAGE" \
         > "$install_out" 2>&1
     install_code=$?
     set -e
-    tail -n 8 "$install_out"
-    version=$(inside "dpkg-query -W -f '\${Version}' $BT_ARCHIVE_PACKAGE" || true)
-    status=$(inside "dpkg-query -W -f '\${Status}' $BT_ARCHIVE_PACKAGE" || true)
-    bt_install_verdict "$BT_ARCHIVE_PACKAGE" "$install_code" "$version" "$status" "$install_out"
+    tail -n 6 "$install_out"
+    version=$(inside "dpkg-query -W -f '\${Version}' $BT_INSTALL_PACKAGE" || true)
+    status=$(inside "dpkg-query -W -f '\${Status}' $BT_INSTALL_PACKAGE" || true)
+    bt_install_verdict "$BT_INSTALL_PACKAGE" "$install_code" "$version" "$status" "$install_out"
 fi
 
 # 12. No drift between the declared spec and the booted root.

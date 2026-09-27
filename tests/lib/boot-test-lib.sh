@@ -50,16 +50,25 @@ BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 # sets.
 BT_POLICY_PACKAGE="inithooks"
 BT_ARCHIVE_PIN=1001
-# And a project package the image does NOT carry, installed from the archive
-# for real. That exercises the whole path an operator cares about, fetch,
-# signature check and installation, and needs no version newer than the image
-# to exist. Requiring one would mean either inventing a release or shipping the
-# image deliberately stale so the archive is always ahead, and both would be
-# lies told to make a test pass. keel-transition is the obvious choice: it is
-# ours, it is small, it has no maintainer script, and everything it depends on
-# is in the image already, so a failed install cannot leave the appliance
-# unable to boot.
-BT_ARCHIVE_PACKAGE="keel-transition"
+# And the package path itself, in two steps, neither of which needs a version
+# newer than the image to exist. Requiring one would mean either inventing a
+# release or shipping the image deliberately stale so the archive is always
+# ahead, and both would be lies told to make a test pass.
+#
+# Both steps stay inside our own archive on purpose. The CI runner has no IPv4
+# route out (docs/releases-host.md section 7), so Debian's mirrors are
+# unreachable from a container there while ours, being IPv6, is not: a step
+# that needed a package from Debian would be testing the runner's network
+# rather than the appliance. keel-transition, for instance, depends on gpgv,
+# which a Debian 13 appliance does not carry because apt verifies with sqv.
+#
+# A project package the image has NOT got, fetched from the archive. apt
+# checks the download against the digest in the signed index, so this is the
+# signature reaching a real file and not only an index.
+BT_FETCH_PACKAGE="keel-transition"
+# And a project package the image has, reinstalled, which downloads it again
+# and runs dpkg on it: the installation half of the same path.
+BT_INSTALL_PACKAGE="keel-archive-keyring"
 
 bt_usage() {
     cat <<USAGE
@@ -78,7 +87,10 @@ then proves, in this order:
   apt-get update against $BT_ARCHIVE_URI verifies its signature
   apt-cache policy shows $BT_POLICY_PACKAGE coming from that archive, at the
     priority the appliance's own pin file sets
-  apt-get install fetches, verifies and installs $BT_ARCHIVE_PACKAGE from it
+  apt-get download fetches $BT_FETCH_PACKAGE, which the image has not got,
+    from that archive and against the digest the signed index carries
+  apt-get install --reinstall $BT_INSTALL_PACKAGE downloads it again and runs
+    dpkg on it, so the whole path is exercised
   keel diff reports no drift
 
 Root only.
@@ -590,6 +602,29 @@ bt_absent_verdict() {
     echo "boot-test: $package is not in the image, which is what makes the next step a proof"
 }
 
+bt_download_verdict() {
+    # bt_download_verdict PACKAGE CODE FILE OUTPUT: apt fetched the package
+    # from our archive into FILE. apt checks a download against the digest the
+    # signed index carries and refuses an archive it cannot verify before it
+    # asks for a single byte, so a file that arrives this way is a file the
+    # signature covers.
+    local package=$1 code=$2 file=$3 output=$4
+    if [ "$code" != 0 ]; then
+        echo "boot-test: apt-get download $package exited $code" >&2
+        return 1
+    fi
+    if ! awk -v uri="$BT_ARCHIVE_URI" -v pkg="$package" \
+        '/^Get:/ && index($0, uri) && index($0, pkg) { found = 1 } END { exit !found }' "$output"; then
+        echo "boot-test: apt did not fetch $package from $BT_ARCHIVE_URI" >&2
+        return 1
+    fi
+    if [ ! -s "$file" ]; then
+        echo "boot-test: apt-get download $package left no file at $file" >&2
+        return 1
+    fi
+    echo "boot-test: apt fetched $package from $BT_ARCHIVE_URI, against the digest of the signed index"
+}
+
 bt_install_verdict() {
     # bt_install_verdict PACKAGE CODE VERSION STATUS FILE: the package was
     # fetched from our archive, installed, and dpkg has it configured. apt
@@ -598,7 +633,7 @@ bt_install_verdict() {
     # bytes that were actually installed, not only on an index.
     local package=$1 code=$2 version=$3 status=$4 file=$5
     if [ "$code" != 0 ]; then
-        echo "boot-test: apt-get install $package exited $code" >&2
+        echo "boot-test: apt-get install --reinstall $package exited $code" >&2
         return 1
     fi
     if ! awk -v uri="$BT_ARCHIVE_URI" -v pkg="$package" \
@@ -614,7 +649,7 @@ bt_install_verdict() {
         echo "boot-test: $package is '$status' after the install, not 'install ok installed'" >&2
         return 1
     fi
-    echo "boot-test: apt fetched, verified and installed $package $version from $BT_ARCHIVE_URI"
+    echo "boot-test: apt fetched and reinstalled $package $version from $BT_ARCHIVE_URI, dpkg configured"
 }
 
 bt_diff_verdict() {

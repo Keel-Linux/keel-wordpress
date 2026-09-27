@@ -137,7 +137,7 @@ origin at 1001. So on a booted appliance::
 
     apt-get update      # reads our archive and verifies its signature
     apt-get upgrade     # takes newer Debian and newer project packages
-    apt-get install keel-transition   # installs a project package from us
+    apt-get install keel-transition   # a project package, from our archive
 
 covers two things:
 
@@ -147,13 +147,21 @@ covers two things:
 
 The boot test proves that path rather than proving that a newer version
 happens to exist on the day it runs. It asserts that ``apt-get update``
-verifies our archive's signature, that ``apt-cache policy`` shows a project
+verifies our archive's signature; that ``apt-cache policy`` shows a project
 package the image carries with our archive as the source of its candidate at
-that pin priority, and that ``apt-get install`` of ``keel-transition``, which
-the image does not carry, fetches it from our archive, verifies it and
-installs it. apt refuses an unverifiable archive before it downloads anything,
-so the third one is the signature check passing on the bytes that were
-installed and not only on an index.
+that pin priority; that ``keel-transition``, which the image does not carry,
+comes down from our archive against the digest the signed index holds; and
+that a project package the image does carry is downloaded again and put
+through dpkg. apt refuses an archive it cannot verify before it asks for a
+single byte, so those last two are the signature reaching real files and not
+only an index.
+
+All of it stays inside our own archive on purpose. Installing
+``keel-transition`` on a real appliance also pulls ``gpgv`` from Debian, which
+a Debian 13 image does not carry because apt verifies with ``sqv``; that is
+fine on a machine with a route to Debian, and the CI runner has no IPv4 route
+out, so a test step that needed it would be measuring the runner's network
+instead of this appliance.
 
 It does **not** cover WordPress core, and saying otherwise would be a lie in
 the documentation. Nobody packages WordPress for Debian and we do not package
