@@ -603,12 +603,17 @@ bt_absent_verdict() {
 }
 
 bt_download_verdict() {
-    # bt_download_verdict PACKAGE CODE FILE OUTPUT: apt fetched the package
-    # from our archive into FILE. apt checks a download against the digest the
-    # signed index carries and refuses an archive it cannot verify before it
-    # asks for a single byte, so a file that arrives this way is a file the
-    # signature covers.
-    local package=$1 code=$2 file=$3 output=$4
+    # bt_download_verdict PACKAGE CODE SIZE OUTPUT: apt fetched the package
+    # from our archive, and the file it left is SIZE bytes. apt checks a
+    # download against the digest the signed index carries and refuses an
+    # archive it cannot verify before it asks for a single byte, so a file
+    # that arrives this way is a file the signature covers.
+    #
+    # The size is measured inside the container and passed in, not read from
+    # the rootfs here: apt writes into a tmpfs the host does not see through
+    # the rootfs directory, so a check on a host path would fail on a download
+    # that worked.
+    local package=$1 code=$2 size=$3 output=$4
     if [ "$code" != 0 ]; then
         echo "boot-test: apt-get download $package exited $code" >&2
         return 1
@@ -618,10 +623,11 @@ bt_download_verdict() {
         echo "boot-test: apt did not fetch $package from $BT_ARCHIVE_URI" >&2
         return 1
     fi
-    if [ ! -s "$file" ]; then
-        echo "boot-test: apt-get download $package left no file at $file" >&2
+    if [ -z "$size" ] || [ "$size" -le 0 ] 2>/dev/null; then
+        echo "boot-test: apt-get download $package left no file (size '${size:-none}')" >&2
         return 1
     fi
+    echo "boot-test: the $package archive is $size bytes"
     echo "boot-test: apt fetched $package from $BT_ARCHIVE_URI, against the digest of the signed index"
 }
 

@@ -611,25 +611,26 @@ EOF
 
 @test "download_verdict passes when apt fetched the deb from our archive" {
     printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
-    printf 'deb bytes' > "$S/pkg.deb"
-    run bt_download_verdict keel-transition 0 "$S/pkg.deb" "$S/out"
+    run bt_download_verdict keel-transition 0 13836 "$S/out"
     [ "$status" -eq 0 ]
     [[ "$output" == *"fetched keel-transition from https://archive.keellinux.org"* ]]
+    [[ "$output" == *"13836 bytes"* ]]
 }
 
 @test "download_verdict refuses a non zero exit, another archive and a missing file" {
     printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out"
-    printf 'deb bytes' > "$S/pkg.deb"
-    run bt_download_verdict keel-transition 100 "$S/pkg.deb" "$S/out"
+    run bt_download_verdict keel-transition 100 13836 "$S/out"
     [ "$status" -eq 1 ]
     [[ "$output" == *"exited 100"* ]]
     printf 'Get:1 http://deb.debian.org/debian trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out2"
-    run bt_download_verdict keel-transition 0 "$S/pkg.deb" "$S/out2"
+    run bt_download_verdict keel-transition 0 13836 "$S/out2"
     [ "$status" -eq 1 ]
     [[ "$output" == *"did not fetch keel-transition from"* ]]
-    run bt_download_verdict keel-transition 0 "$S/nothing.deb" "$S/out"
+    run bt_download_verdict keel-transition 0 0 "$S/out"
     [ "$status" -eq 1 ]
     [[ "$output" == *"left no file"* ]]
+    run bt_download_verdict keel-transition 0 "" "$S/out"
+    [ "$status" -eq 1 ]
 }
 
 @test "install_verdict passes when apt fetched it from our archive and dpkg configured it" {

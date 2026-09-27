@@ -254,9 +254,9 @@ else
     fetch_code=$?
     set -e
     tail -n 4 "$fetch_out"
-    fetched=$(inside "ls /run/${BT_FETCH_PACKAGE}_*.deb 2>/dev/null | head -1" || true)
-    bt_download_verdict "$BT_FETCH_PACKAGE" "$fetch_code" \
-        "${BT_ROOTFS}${fetched:-/run/nothing}" "$fetch_out"
+    # measured in the container, because apt wrote into a tmpfs
+    fetched_size=$(inside "stat -c %s /run/${BT_FETCH_PACKAGE}_*.deb 2>/dev/null | head -1" || true)
+    bt_download_verdict "$BT_FETCH_PACKAGE" "$fetch_code" "${fetched_size:-0}" "$fetch_out"
     inside "rm -f /run/${BT_FETCH_PACKAGE}_*.deb" || true
 
     # And the installation half: the same archive, downloaded again and put
