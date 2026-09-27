@@ -42,10 +42,24 @@ BT_ARCHIVE_URI="https://archive.keellinux.org"
 BT_ARCHIVE_SUITE="trixie"
 BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.gpg"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
-# The project package the upgrade proof upgrades. It is small, it is ours, and
-# nothing in the image depends on its version, so a failed upgrade cannot
-# leave the appliance unable to boot.
-BT_UPGRADE_PACKAGE="keel-archive-keyring"
+# What the two update proofs use, beyond apt-get update itself.
+#
+# A project package the image already carries, to show that apt would take its
+# next version from our archive rather than from anywhere else: the candidate
+# has to come from our archive, at the priority the appliance's own pin file
+# sets.
+BT_POLICY_PACKAGE="inithooks"
+BT_ARCHIVE_PIN=1001
+# And a project package the image does NOT carry, installed from the archive
+# for real. That exercises the whole path an operator cares about, fetch,
+# signature check and installation, and needs no version newer than the image
+# to exist. Requiring one would mean either inventing a release or shipping the
+# image deliberately stale so the archive is always ahead, and both would be
+# lies told to make a test pass. keel-transition is the obvious choice: it is
+# ours, it is small, it has no maintainer script, and everything it depends on
+# is in the image already, so a failed install cannot leave the appliance
+# unable to boot.
+BT_ARCHIVE_PACKAGE="keel-transition"
 
 bt_usage() {
     cat <<USAGE
@@ -62,7 +76,9 @@ then proves, in this order:
   the administrator logs in over HTTP with the declared app_password, and a
     wrong password is refused
   apt-get update against $BT_ARCHIVE_URI verifies its signature
-  apt-get upgrade installs a newer $BT_UPGRADE_PACKAGE from it
+  apt-cache policy shows $BT_POLICY_PACKAGE coming from that archive, at the
+    priority the appliance's own pin file sets
+  apt-get install fetches, verifies and installs $BT_ARCHIVE_PACKAGE from it
   keel diff reports no drift
 
 Root only.
@@ -78,8 +94,8 @@ options:
   --lxc-path DIR        lxcpath for the test container (default $BT_DEFAULT_LXC_PATH)
   --name NAME           container name (default keel-APPLIANCE-boot-test)
   --spec FILE           instance spec (default tests/instance.yaml)
-  --skip-update         do not run the two APT proofs (no network, or the
-                        archive has nothing newer to offer yet)
+  --skip-update         do not run the three APT proofs (a host with no
+                        outbound network)
   --keep                leave the container running for inspection
   -h, --help            this text
 USAGE
@@ -532,46 +548,73 @@ bt_apt_update_verdict() {
     echo "boot-test: apt-get update read $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE and verified its signature"
 }
 
-bt_upgrade_available_verdict() {
-    # bt_upgrade_available_verdict PACKAGE INSTALLED CANDIDATE: there is
-    # something newer in the archive than what the layer carries, or there is
-    # not and this proof cannot be made. Said plainly rather than passing
-    # quietly, because a proof that passes when there is nothing to upgrade
-    # proves nothing at all.
-    local package=$1 installed=$2 candidate=$3
-    if [ -z "$installed" ] || [ -z "$candidate" ]; then
-        echo "boot-test: apt knows no $installed/$candidate version of $package" >&2
+bt_policy_verdict() {
+    # bt_policy_verdict PACKAGE FILE: FILE is "apt-cache policy PACKAGE" from
+    # inside the appliance. Our archive has to be a source apt knows, at the
+    # priority the appliance's own /etc/apt/preferences.d/keel sets, and the
+    # candidate has to be the version that source offers. That is what "this
+    # machine takes its project packages from Keel" means, and it is true
+    # whether or not a newer version happens to exist today.
+    local package=$1 file=$2 candidate
+    candidate=$(awk '$1 == "Candidate:" { print $2; exit }' "$file")
+    if [ -z "$candidate" ] || [ "$candidate" = "(none)" ]; then
+        echo "boot-test: apt has no candidate for $package" >&2
         return 1
     fi
-    if [ "$installed" = "$candidate" ]; then
-        echo "boot-test: $package is $installed and the archive offers the same:" \
-            "there is nothing newer to upgrade to, so the upgrade proof cannot be made" >&2
+    if ! awk -v pin="$BT_ARCHIVE_PIN" -v uri="$BT_ARCHIVE_URI" \
+        '$1 == pin && $2 == uri { found = 1 } END { exit !found }' "$file"; then
+        echo "boot-test: $BT_ARCHIVE_URI is not a source of $package at priority $BT_ARCHIVE_PIN" >&2
         return 1
     fi
-    if ! dpkg --compare-versions "$candidate" gt "$installed"; then
-        echo "boot-test: the archive offers $package $candidate and the image carries" \
-            "$installed, which is newer. This is not only a proof that cannot be made:" \
-            "/etc/apt/preferences.d/keel pins this origin at 1001, which is the priority" \
-            "that downgrades, so apt-get upgrade would replace the installed package with" \
-            "the archive's older one. Publish $installed to the archive." >&2
+    if ! awk -v version="$candidate" -v pin="$BT_ARCHIVE_PIN" \
+        '$1 == version && $2 == pin { found = 1 } END { exit !found }' "$file"; then
+        echo "boot-test: the candidate $package $candidate does not come from" \
+            "$BT_ARCHIVE_URI at priority $BT_ARCHIVE_PIN" >&2
         return 1
     fi
-    echo "boot-test: $package $installed is installed and $BT_ARCHIVE_URI offers $candidate"
+    echo "boot-test: apt takes $package from $BT_ARCHIVE_URI at priority" \
+        "$BT_ARCHIVE_PIN, candidate $candidate"
 }
 
-bt_upgrade_verdict() {
-    # bt_upgrade_verdict PACKAGE WANTED INSTALLED CODE: after the upgrade the
-    # package is the version the archive offered, and dpkg has it configured.
-    local package=$1 wanted=$2 installed=$3 code=$4
+bt_absent_verdict() {
+    # bt_absent_verdict PACKAGE STATUS: the package must not be installed
+    # before the install proof, or the proof is about nothing.
+    local package=$1 status=${2-}
+    case "$status" in
+        *"install ok installed")
+            echo "boot-test: $package is already installed ('$status'), so installing" \
+                "it from the archive would prove nothing" >&2
+            return 1
+            ;;
+    esac
+    echo "boot-test: $package is not in the image, which is what makes the next step a proof"
+}
+
+bt_install_verdict() {
+    # bt_install_verdict PACKAGE CODE VERSION STATUS FILE: the package was
+    # fetched from our archive, installed, and dpkg has it configured. apt
+    # refuses an unverifiable archive before it downloads anything, so a
+    # successful fetch from our URI is the signature check passing on the
+    # bytes that were actually installed, not only on an index.
+    local package=$1 code=$2 version=$3 status=$4 file=$5
     if [ "$code" != 0 ]; then
-        echo "boot-test: apt-get upgrade exited $code" >&2
+        echo "boot-test: apt-get install $package exited $code" >&2
         return 1
     fi
-    if [ "$installed" != "$wanted" ]; then
-        echo "boot-test: $package is $installed after the upgrade, not $wanted" >&2
+    if ! awk -v uri="$BT_ARCHIVE_URI" -v pkg="$package" \
+        '/^Get:/ && index($0, uri) && index($0, pkg) { found = 1 } END { exit !found }' "$file"; then
+        echo "boot-test: apt did not fetch $package from $BT_ARCHIVE_URI" >&2
         return 1
     fi
-    echo "boot-test: apt-get upgrade installed $package $wanted from $BT_ARCHIVE_URI"
+    if [ -z "$version" ]; then
+        echo "boot-test: $package has no version after the install" >&2
+        return 1
+    fi
+    if [ "$status" != "install ok installed" ]; then
+        echo "boot-test: $package is '$status' after the install, not 'install ok installed'" >&2
+        return 1
+    fi
+    echo "boot-test: apt fetched, verified and installed $package $version from $BT_ARCHIVE_URI"
 }
 
 bt_diff_verdict() {

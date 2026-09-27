@@ -17,9 +17,11 @@
 #   5. the administrator logs in over HTTP with the declared app_password and
 #      is given a session cookie, a wrong password is refused, and the
 #      dashboard comes back for the session
-#   6. apt-get update against archive.keellinux.org verifies its signature
-#   7. apt-get upgrade installs a newer project package from that archive
-#   8. keel diff reports no drift between the spec and the machine
+#   6. apt-get update against archive.keellinux.org verifies its signature,
+#      apt takes a project package from that archive at the appliance's own pin
+#      priority, and apt-get install fetches, verifies and installs a project
+#      package the image has not got
+#   7. keel diff reports no drift between the spec and the machine
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
 # verify; runnable by hand as root on any host with LXC, see tests/README.md.
@@ -225,25 +227,33 @@ else
     inside 'apt-get update' > "$update_out" 2>&1
     update_code=$?
     set -e
-    tail -n 20 "$update_out"
+    tail -n 6 "$update_out"
     bt_apt_update_verdict "$update_code" "$update_out"
 
-    installed=$(inside "dpkg-query -W -f '\${Version}' $BT_UPGRADE_PACKAGE" || true)
-    candidate=$(inside "apt-cache policy $BT_UPGRADE_PACKAGE | awk '\$1 == \"Candidate:\" { print \$2 }'" || true)
-    bt_upgrade_available_verdict "$BT_UPGRADE_PACKAGE" "$installed" "$candidate"
+    # Where apt would take a project package from. Not whether a newer one
+    # exists: that depends on what the archive happens to hold tonight, and a
+    # test that needs it either invents a release or wants the image kept
+    # stale. What matters to an operator is that this machine's project
+    # packages come from our archive, at the priority the appliance sets.
+    policy_out=$container_dir/apt-policy.txt
+    inside "apt-cache policy $BT_POLICY_PACKAGE" > "$policy_out" 2>&1
+    cat "$policy_out"
+    bt_policy_verdict "$BT_POLICY_PACKAGE" "$policy_out"
 
+    # And the whole path, end to end, on a project package the image has not
+    # got: apt fetches it from our archive, verifies it and installs it.
+    before=$(inside "dpkg-query -W -f '\${Status}' $BT_ARCHIVE_PACKAGE 2>/dev/null" || true)
+    bt_absent_verdict "$BT_ARCHIVE_PACKAGE" "$before"
+    install_out=$container_dir/apt-install.txt
     set +e
-    inside "DEBIAN_FRONTEND=noninteractive apt-get -y --only-upgrade install $BT_UPGRADE_PACKAGE" \
-        > "$container_dir/apt-upgrade.txt" 2>&1
-    upgrade_code=$?
+    inside "DEBIAN_FRONTEND=noninteractive apt-get -y install $BT_ARCHIVE_PACKAGE" \
+        > "$install_out" 2>&1
+    install_code=$?
     set -e
-    tail -n 12 "$container_dir/apt-upgrade.txt"
-    now=$(inside "dpkg-query -W -f '\${Version} \${Status}' $BT_UPGRADE_PACKAGE" || true)
-    bt_upgrade_verdict "$BT_UPGRADE_PACKAGE" "$candidate" "${now% *}" "$upgrade_code"
-    case "$now" in
-        *"install ok installed") echo "boot-test: dpkg has $BT_UPGRADE_PACKAGE configured after the upgrade" ;;
-        *) echo "boot-test: $BT_UPGRADE_PACKAGE is '$now' after the upgrade" >&2; exit 1 ;;
-    esac
+    tail -n 8 "$install_out"
+    version=$(inside "dpkg-query -W -f '\${Version}' $BT_ARCHIVE_PACKAGE" || true)
+    status=$(inside "dpkg-query -W -f '\${Status}' $BT_ARCHIVE_PACKAGE" || true)
+    bt_install_verdict "$BT_ARCHIVE_PACKAGE" "$install_code" "$version" "$status" "$install_out"
 fi
 
 # 12. No drift between the declared spec and the booted root.

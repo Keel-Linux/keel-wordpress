@@ -88,7 +88,8 @@ setup() {
     [ "$status" -eq 2 ]
     [[ "$output" == *"wp-login"* ]] || [[ "$output" == *"logs in"* ]]
     [[ "$output" == *"apt-get update"* ]]
-    [[ "$output" == *"apt-get upgrade"* ]]
+    [[ "$output" == *"apt-get install"* ]]
+    [[ "$output" == *"apt-cache policy"* ]]
 }
 
 @test "container_name and the name predicates" {
@@ -538,36 +539,104 @@ EOF
     [[ "$output" == *"never reached"* ]]
 }
 
-@test "upgrade_available_verdict passes when the archive offers something newer" {
-    run bt_upgrade_available_verdict keel-archive-keyring 0.1.0 0.1.1
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"0.1.0 is installed and"* ]]
-    [[ "$output" == *"offers 0.1.1"* ]]
+_policy() {
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: ${1:-2.3.6+keel4}
+  Candidate: ${2:-2.3.6+keel5}
+  Version table:
+     ${2:-2.3.6+keel5} ${3:-1001}
+        ${3:-1001} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
+ *** ${1:-2.3.6+keel4} 100
+        100 /var/lib/dpkg/status
+EOF
 }
 
-@test "upgrade_available_verdict says so rather than passing quietly when there is nothing newer" {
-    run bt_upgrade_available_verdict keel-archive-keyring 0.1.1 0.1.1
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"nothing newer to upgrade to"* ]]
-    run bt_upgrade_available_verdict keel-archive-keyring 0.1.1 0.1.0
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"which is newer"* ]]
-    # and it says what that costs, because the pin at 1001 downgrades
-    [[ "$output" == *"apt-get upgrade would replace"* ]]
-    run bt_upgrade_available_verdict keel-archive-keyring "" 0.1.1
-    [ "$status" -eq 1 ]
+@test "policy_verdict passes when the candidate comes from our archive at our pin" {
+    _policy
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 1001"* ]]
+    [[ "$output" == *"candidate 2.3.6+keel5"* ]]
 }
 
-@test "upgrade_verdict wants the offered version installed and the exit clean" {
-    run bt_upgrade_verdict inithooks 2.3.6+keel5 2.3.6+keel5 0
+@test "policy_verdict passes when the archive offers exactly what is installed" {
+    # the ordinary state of a current appliance, and not a failure
+    _policy 2.3.6+keel5 2.3.6+keel5
+    run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"installed inithooks 2.3.6+keel5"* ]]
-    run bt_upgrade_verdict inithooks 2.3.6+keel5 2.3.6+keel4 0
+}
+
+@test "policy_verdict refuses a package apt has no candidate for" {
+    printf 'inithooks:\n  Installed: (none)\n  Candidate: (none)\n' > "$S/policy"
+    run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"after the upgrade, not"* ]]
-    run bt_upgrade_verdict inithooks 2.3.6+keel5 2.3.6+keel5 100
+    [[ "$output" == *"no candidate"* ]]
+}
+
+@test "policy_verdict refuses an archive that is not a source at our pin" {
+    _policy 2.3.6+keel4 2.3.6+keel5 500
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not a source of inithooks at priority 1001"* ]]
+}
+
+@test "policy_verdict refuses a candidate that comes from somewhere else" {
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+keel4
+  Candidate: 9.9.9
+  Version table:
+     9.9.9 990
+        990 http://deb.debian.org/debian trixie/main amd64 Packages
+     2.3.6+keel5 1001
+        1001 https://archive.keellinux.org trixie/main amd64 Packages
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not come from"* ]]
+}
+
+@test "absent_verdict wants the package not installed before the proof" {
+    run bt_absent_verdict keel-transition "unknown ok not-installed"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"is not in the image"* ]]
+    run bt_absent_verdict keel-transition ""
+    [ "$status" -eq 0 ]
+    run bt_absent_verdict keel-transition "install ok installed"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"would prove nothing"* ]]
+}
+
+@test "install_verdict passes when apt fetched it from our archive and dpkg configured it" {
+    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
+    run bt_install_verdict keel-transition 0 0.1.1 "install ok installed" "$S/out"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"fetched, verified and installed keel-transition 0.1.1"* ]]
+}
+
+@test "install_verdict refuses a non zero exit" {
+    : > "$S/out"
+    run bt_install_verdict keel-transition 100 "" "" "$S/out"
     [ "$status" -eq 1 ]
     [[ "$output" == *"exited 100"* ]]
+}
+
+@test "install_verdict refuses a package that came from anywhere but our archive" {
+    printf 'Get:1 http://deb.debian.org/debian trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
+    run bt_install_verdict keel-transition 0 0.1.1 "install ok installed" "$S/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"did not fetch keel-transition from"* ]]
+}
+
+@test "install_verdict refuses a half configured package and one with no version" {
+    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
+    run bt_install_verdict keel-transition 0 0.1.1 "install ok unpacked" "$S/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not 'install ok installed'"* ]]
+    run bt_install_verdict keel-transition 0 "" "install ok installed" "$S/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no version after the install"* ]]
 }
 
 # --- keel diff --------------------------------------------------------------
