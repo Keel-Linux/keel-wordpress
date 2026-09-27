@@ -1,0 +1,48 @@
+# Tests of the keel-wordpress appliance recipe (decision 0006 point 4):
+#   tests:     the first boot library, the first boot hook, the boot test
+#              library and the two build time scripts, under bats and kcov on
+#              hosted runners, threshold committed here
+#   appliance: fetch the published layer, verify it, assemble it, boot it in
+#              LXC and prove the install, the login and the update path over
+#              IPv6, on the self-hosted runner
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # tests/coverage.sh measures five shell files (COVERAGE.md). The threshold
+    # is the lowest of them and is only ever raised (decision 0006). This job
+    # produces the check "tests / coverage", the required status on master. The
+    # job id is part of that name, so renaming it silently detaches the
+    # protection rule.
+    uses: keel-linux/.github/.github/workflows/test-shell.yml@main
+    with:
+      threshold: 95
+  appliance:
+    # The boot test (org-plan section 1): the wordpress layer is fetched from
+    # https://mirror.keellinux.org/layers, verified, assembled into a scratch
+    # rootfs, booted in LXC and checked by tests/boot-test.sh. Nothing is built
+    # there; the build host publishes the layer (docs/releases-host.md of the
+    # keel repository).
+    #
+    # test-appliance.yml targets the labels "self-hosted, keel-lxc"; a job aimed
+    # at a label no runner carries stays queued until GitHub cancels it after 24
+    # hours, so the reusable workflow's contract is that callers gate on the
+    # organization variable KEEL_LXC_RUNNER (docs/ci-cd.md section 5 of the keel
+    # repository). This job produces the check "appliance / build-and-boot".
+    if: vars.KEEL_LXC_RUNNER == 'true'
+    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
+    with:
+      appliance: wordpress
+      # The delta is built on the mariadb layer; the workflow checks this
+      # against the parent the published manifest records. It becomes
+      # apache-php when that layer lands, and the layer is rebuilt then.
+      parent: mariadb
+      timeout: 60
