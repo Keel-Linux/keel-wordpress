@@ -1,0 +1,70 @@
+#!/bin/bash -e
+# Turn on the project's signed APT archive, which is the appliance's update
+# path, and prove that the key it will be verified with is in the image.
+#
+# Runs last, after conf.d/zz-project-packages has removed the build time
+# file: source and emptied /var/lib/apt/lists. The order matters: with this
+# source enabled during the build, apt would resolve the project packages over
+# the network instead of from the copy of the archive inside the build tree,
+# which is the one thing zz-project-packages exists to prove, and the layer
+# would need a name to be reachable to build at all.
+#
+# It does not run "apt-get update". A conf script has no guarantee of a
+# network, an index fetched here would be stale in the image anyway, and
+# asserting a setting is not asserting the behaviour (docs/traps.md): whether
+# apt can actually verify this archive is proved on the booted machine by
+# tests/boot-test.sh.
+#
+# The paths are overridable so tests/keel-archive.bats can run this against a
+# scratch tree.
+
+KEEL_SOURCES="${KEEL_SOURCES:-/etc/apt/sources.list.d/keel.sources}"
+KEEL_KEYRING="${KEEL_KEYRING:-/usr/share/keyrings/keel-archive-keyring.gpg}"
+KEEL_ARCHIVE_URI="${KEEL_ARCHIVE_URI:-https://archive.keellinux.org}"
+KEEL_ARCHIVE_SUITE="${KEEL_ARCHIVE_SUITE:-trixie}"
+KEEL_STAGING_LIST="${KEEL_STAGING_LIST:-/etc/apt/sources.list.d/keel-staging.list}"
+
+fatal() {
+    echo "fatal [zzz-keel-archive]: $*" >&2
+    exit 1
+}
+
+field() {
+    # field NAME FILE: the value of a deb822 field, first occurrence
+    awk -v name="$1:" '$1 == name { $1 = ""; sub(/^ /, ""); print; exit }' "$2"
+}
+
+[ -f "$KEEL_SOURCES" ] || fatal "$KEEL_SOURCES is not in the image"
+[ -s "$KEEL_KEYRING" ] || fatal "$KEEL_KEYRING is missing or empty: the plan asks for keel-archive-keyring"
+
+# The build time source must be gone before this one is enabled.
+[ ! -e "$KEEL_STAGING_LIST" ] \
+    || fatal "$KEEL_STAGING_LIST is still in the image: conf.d/zz-project-packages did not run"
+
+# Never the unsigned staging distribution: it exists only inside a build.
+suite=$(field Suites "$KEEL_SOURCES")
+[ "$suite" = "$KEEL_ARCHIVE_SUITE" ] \
+    || fatal "$KEEL_SOURCES names the suite '$suite', not '$KEEL_ARCHIVE_SUITE'"
+case "$suite" in
+    *staging*) fatal "$KEEL_SOURCES names an unsigned staging distribution" ;;
+esac
+
+uri=$(field URIs "$KEEL_SOURCES")
+[ "$uri" = "$KEEL_ARCHIVE_URI" ] \
+    || fatal "$KEEL_SOURCES names '$uri', not '$KEEL_ARCHIVE_URI'"
+
+signed_by=$(field Signed-By "$KEEL_SOURCES")
+[ "$signed_by" = "$KEEL_KEYRING" ] \
+    || fatal "$KEEL_SOURCES is signed by '$signed_by', not '$KEEL_KEYRING'"
+
+# A keyring with no key in it verifies nothing and apt says so only at run
+# time, so the key is counted here. gpg is in the image (core), and reading a
+# keyring needs no network and no agent.
+keys=$(gpg --show-keys --with-colons "$KEEL_KEYRING" 2>/dev/null | grep -c '^pub:' || true)
+[ "$keys" -ge 1 ] || fatal "$KEEL_KEYRING carries no public key"
+
+sed -i 's/^Enabled: no$/Enabled: yes/' "$KEEL_SOURCES"
+grep -qx 'Enabled: yes' "$KEEL_SOURCES" \
+    || fatal "$KEEL_SOURCES is still not enabled"
+
+echo "[zzz-keel-archive] $uri $suite enabled, verified with $KEEL_KEYRING ($keys key)"

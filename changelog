@@ -1,3 +1,61 @@
+turnkey-wordpress-19.0 (2) turnkey; urgency=low
+
+  * The appliance is a Keel layer on the published mariadb layer: Apache, PHP
+    and WordPress are the delta, and the database is already built, tested and
+    published. The parent moves to the apache-php layer when that lands, which
+    is a cheap rebuild because layers are content addressed (README.rst).
+
+  * The installation happens on the first boot, from the instance description,
+    and the WordPress installer is never offered. Version 1 ran it at build
+    time with DB_PASS=turnkey and ADMIN_PASS=turnkey in conf.d/main, so every
+    machine built on the layer had the same two passwords, in a file anyone
+    could read. The layer now carries no credential at all: no wp-config.php,
+    and a database account created with a hash no input produces.
+
+  * firstboot.d/40wordpress writes wp-config.php and runs the installation
+    from /etc/keel/instance.yaml: the site title from app.options.site_title,
+    the administrator from app.options.admin_user and secrets.app_password,
+    and the database password from secrets.db_password, which the parent
+    layer's 35mysqlpass has already given to the database. Both passwords are
+    passed through a shell function or the environment and never as an
+    argument of another process. The hook then asks the site to authenticate
+    that account, and asks it to refuse a wrong password, before it lets
+    Apache serve anything.
+
+  * wp-config.php decides WP_HOME and WP_SITEURL per request from the Host
+    header instead of reading them from the database, so the appliance answers
+    on whatever address or name reaches it. A WordPress whose recorded site
+    URL is not the one it is reached by answers a permanent redirect to the
+    recorded one, which for a machine reached by its IPv6 literal means
+    sending the visitor to a name that does not resolve.
+
+  * The salts in wp-config.php are generated on the machine instead of being
+    fetched from WordPress's API, because a first boot must not need the
+    internet.
+
+  * The appliance ships the project's signed APT archive enabled, verified
+    with the keyring of the new keel-archive-keyring package, so "apt-get
+    update" and "apt-get upgrade" work against archive.keellinux.org with
+    signature verification. conf.d/zzz-keel-archive enables it as the last
+    step of the build, after the unsigned build time source is gone.
+    WordPress core is not in that archive and is not updated by it: it
+    updates through WordPress's own mechanism, or through
+    turnkey-wordpress-update, which verifies WordPress's own checksums and
+    puts the ownership boundary back.
+
+  * Adminer, lighttpd and the rest of turnkey/lamp are left out: the parent
+    layer administers the database through webmin-mysql in the panel core
+    already carries, and Adminer would bring a second first boot hook at 35
+    reading the same DB_PASS for an account this appliance does not use.
+
+  * /etc/cron.d/wordpress-cron reaches wp-cron.php over the IPv6 loopback
+    literal, because on Debian "localhost" is an IPv4 name only.
+
+  * Ports: 80, 443, 12320 and 12321. 3306 is closed, although the parent
+    layer opened it: this appliance reaches its own database over loopback.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 27 Sep 2026 10:00:00 +0000
+
 turnkey-wordpress-19.0 (1) turnkey; urgency=low
 
   * Update WordPress to latest upstream - v7.0.4.
