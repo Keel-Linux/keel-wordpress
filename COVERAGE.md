@@ -4,12 +4,14 @@ Standard: decisions 0003 (90 percent per repository, 95 for code the project
 writes) and 0004 (bats plus kcov for shell; a build and a boot on LXC as the
 acceptance test of a recipe, docs/org-plan.md section 1).
 
-## Measured 2026-09-27
+## Measured 2026-09-28
 
 | File | Test | Lines | Note |
 | --- | --- | --- | --- |
 | `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (40 tests) | 99.00 percent (99/100) under kcov | every function and every branch |
 | `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (29 tests) | 97.73 percent (43/44) under kcov | the hook itself, run for real |
+| `overlay/usr/local/bin/keel-wp` | `tests/wrappers.bats` (21 tests) | 100 percent (9/9) under kcov | both cache branches, the quoting, the exit code it hands back, `DEBUG`, and the `turnkey-wp` link run for real |
+| `overlay/usr/local/sbin/keel-wordpress-update` | `tests/wrappers.bats` (the same 21) | 100 percent (18/18) under kcov | the root guard refused and satisfied, each wp-cli call made to fail, and the whole ownership boundary |
 | `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (73 tests) | 98.95 percent (282/285) under kcov | parsing, addresses, deadlines, the container marks, every verdict, and the image carrying none of the build time archive files |
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (13 tests) | 100 percent (26/26) under kcov | every way it enables and every way it refuses, including a staging keyring left in the image |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (14 tests) | 100 percent (31/31) under kcov | shared with keel-nodebb, where the pattern is maintained |
@@ -19,21 +21,40 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the six measured shell files: **99.07 percent (535/540)**, 196 bats
-tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
+Total over the eight measured shell files: **99.12 percent (562/567)**, 217
+bats tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
 
     $ COVERAGE_THRESHOLD=97 tests/coverage.sh
     kcov line coverage (threshold 97 percent):
+     100.00  18/18  keel-wordpress-update
+     100.00  9/9  keel-wp
      100.00  31/31  zz-project-packages
      100.00  26/26  zzz-keel-archive
+      99.00  99/100  wordpress.sh
       97.73  43/44  40wordpress
       98.95  282/285  boot-test-lib.sh
-      99.00  99/100  wordpress.sh
      100.00  54/54  keel-archive-check
-     100.00  29/29  zz-project-packages
-     100.00  26/26  keel-archive-check
+
+### The two operator commands, and the link beside each
+
+`keel-wp` and `keel-wordpress-update` are the commands an operator types, and
+they are written by this overlay, so decision 0003's 95 percent applies to
+them. They were at nothing until 2026-09-28 and are now at 100 percent of
+their lines with every branch driven: the cache directory both present and
+absent, a `chown` that fails, the exit code of wp-cli handed back, `DEBUG`,
+the root guard refused and satisfied, and each of the two wp-cli calls made to
+fail so the script stops before it touches ownership.
+
+The compatibility names `turnkey-wp` and `turnkey-wordpress-update` are
+symlinks (decision 0015 of the handbook) and are **run**, not inspected.
+`test -L` says a link exists; it does not say the appliance still answers to
+the old name. One of those tests copies the whole overlay with `cp -TdR`,
+which is literally what `fab-apply-overlay` executes, does it twice because
+the Makefile applies this overlay twice, and then runs the copied
+`turnkey-wp`. That is the build's own copy step, so the link is proved to
+survive it rather than assumed to.
 
 ### The five lines that are not covered, and why
 

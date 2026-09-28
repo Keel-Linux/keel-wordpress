@@ -1,3 +1,42 @@
+turnkey-wordpress-19.0 (4) turnkey; urgency=low
+
+  * The two operator commands this appliance writes itself now carry the
+    project's own name: /usr/local/bin/keel-wp and
+    /usr/local/sbin/keel-wordpress-update are the real files, and
+    /usr/local/bin/turnkey-wp and /usr/local/sbin/turnkey-wordpress-update
+    are symlinks to them. Both names keep working, which is the point: an
+    operator who pasted a command out of TurnKey's documentation, or who
+    wrote a script against turnkey-wp last year, must not silently lose it.
+    The general rule is decision 0015 of the handbook (tracker#12).
+
+  * The symlinks are committed into the overlay rather than made in
+    conf.d/main, because fab-apply-overlay copies an overlay with "cp -TdR"
+    and -d keeps a link a link. This recipe applies its overlay twice, once
+    through COMMON_OVERLAYS and once as the product-local ROOT_OVERLAY, and a
+    second copy over an existing link still leaves a link. Both facts are
+    asserted by running the copied turnkey-wp, not by looking at it.
+
+  * Nothing about what either command does has changed. keel-wp still runs
+    wp-cli through runuser as www-data, never as root, with an explicit
+    --path, and still owns /var/www/.wp-cli; keel-wordpress-update still
+    refuses a caller who is not root, updates core, verifies WordPress's own
+    per file checksums and puts the ownership boundary back. The refusal now
+    names whichever of the two names was typed.
+
+  * The paths both scripts hand to another program are overridable from the
+    environment, the way keel-wp's WP_DIR, WP_USR and WP_CACHE already were,
+    so the pair can be driven against a scratch tree. The defaults are the
+    values that were hard coded, so a booted appliance behaves identically.
+    That is what let them be measured: they were at no coverage at all and
+    are now at 100 percent of their lines, every branch driven, in
+    tests/wrappers.bats (COVERAGE.md).
+
+  * conf.d/main, README.rst and tests/v19.sh call the Keel names. tests/v19.sh
+    also asks the compatibility names for the same answers, because a link
+    that resolves is not a link that works.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Mon, 28 Sep 2026 03:00:00 +0000
+
 turnkey-wordpress-19.0 (3) turnkey; urgency=low
 
   * The build verifies the project's own APT archive instead of reading it
