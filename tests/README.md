@@ -30,6 +30,15 @@ the spec.
   as `PATH` stubs that log every call, and a scratch `INITHOOKS_PATH` whose
   `lib` is a symlink to the real library, so kcov measures the file the
   appliance ships.
+- `wrappers.bats`: unit tests of the two operator commands this overlay
+  writes, `overlay/usr/local/bin/keel-wp` and
+  `overlay/usr/local/sbin/keel-wordpress-update`, and of the `turnkey-wp` and
+  `turnkey-wordpress-update` symlinks beside them (decision 0015 of the
+  handbook). `runuser`, `chown`, `install` and `id` are `PATH` stubs that log
+  every call, and wp-cli is a stub named by `WP_CLI`, so no test needs root, a
+  web server or a network. The compatibility names are run rather than
+  inspected, once through a copy of the overlay made with `cp -TdR`, which is
+  what `fab-apply-overlay` executes.
 - `keel-archive.bats`: unit tests of `conf.d/zzz-keel-archive`, the last conf
   script, which enables the project's signed APT archive and refuses to unless
   the key is in the image and the build time source is gone.
@@ -51,6 +60,7 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
 
     bats tests/wordpress.bats
     bats tests/hook.bats
+    bats tests/wrappers.bats
     bats tests/boot-test.bats
     bats tests/keel-archive.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
