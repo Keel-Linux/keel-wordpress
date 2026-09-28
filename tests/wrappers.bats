@@ -10,20 +10,22 @@
 # Both scripts are executed for real against scratch trees. What they hand to
 # another program is a stub first in PATH that writes a line per call into a
 # log the tests read: `runuser`, `chown`, `install` and `id`. wp-cli is a stub
-# named by WP_CLI. No test needs root, a web server, a database or a network.
+# named by KEEL_TEST_WP_CLI. No test needs root, a web server, a database or a
+# network.
 #
-# The symlink is not asserted with `test -L`. A link that resolves is not a
-# link that works, and docs/traps.md of the handbook records "asserting a
+# The web user is a sentinel that no account on the machine can be called, and
+# never `$(id -un)`. The updater must not read the web user from `USER`, which
+# root's login environment sets to `root`, and a test whose expected value
+# happens to equal `$USER` cannot tell the two apart.
+#
+# The symlink is not asserted with `test -L` alone. A link that resolves is not
+# a link that works, and docs/traps.md of the handbook records "asserting a
 # configuration value is not asserting the behaviour it was supposed to
 # produce" as a recurring defect here. So the compatibility name is *run*, and
-# it is run once through a copy of the overlay made the way the build makes it
+# it is run through a copy of the overlay made the way the build makes it
 # (`cp -TdR`, which is what fab-apply-overlay executes).
 
 setup() {
-    # Before PATH is bent: `id` becomes a stub below, and these two want the
-    # real one.
-    ME="$(id -un)"
-
     REPO="$BATS_TEST_DIRNAME/.."
     BIN="$REPO/overlay/usr/local/bin"
     SBIN="$REPO/overlay/usr/local/sbin"
@@ -34,8 +36,15 @@ setup() {
     CALLS="$S/calls"
     : > "$CALLS"
 
+    # A name no account on any machine has, so an assertion on it cannot be
+    # satisfied by whatever the test runner's own user happens to be.
+    WEB_USER=keel-test-web-user
+
     WPROOT="$S/wordpress"
-    mkdir -p "$WPROOT/wp-content"
+    mkdir -p "$WPROOT/wp-content" "$WPROOT/wp-includes"
+    # The updater refuses a target that is not a WordPress, and this is the
+    # file it looks for; conf.d/main asserts the same one after unpacking.
+    printf '<?php $wp_version = %s;\n' "'7.1'" > "$WPROOT/wp-includes/version.php"
     : > "$WPROOT/wp-config.php"
     : > "$WPROOT/index.php"
 
@@ -52,25 +61,25 @@ echo "id \$*" >> "$CALLS"
 echo "\${KEEL_TEST_UID:-0}"
 EOF
     chmod +x "$STUBS/id"
-    # wp-cli: logs, and fails the one subcommand a test names.
-    WP_CLI="$STUBS/wp"
-    cat > "$WP_CLI" <<EOF
+    # wp-cli: logs, and fails the one invocation a test names.
+    cat > "$STUBS/wp" <<EOF
 #!/bin/bash
 echo "wp \$*" >> "$CALLS"
-for arg in "\$@"; do
-    case "\$arg" in --allow-root|--path=*) continue ;; esac
-    first=\$arg; break
-done
 [ "\${KEEL_TEST_WP_FAIL:-}" = "\$*" ] && exit "\${KEEL_TEST_WP_CODE:-1}"
 exit 0
 EOF
-    chmod +x "$WP_CLI"
+    chmod +x "$STUBS/wp"
 
     PATH="$STUBS:$PATH"
-    export PATH WP_CLI
-    export WP_DIR="$WPROOT" WPROOT
-    export WP_USR="$ME" WP_USER="$ME"
-    export WP_CACHE="$S/wp-cli-cache"
+    export PATH
+    # keel-wp's three knobs are the ones it already shipped with and are the
+    # appliance's own. The updater's are KEEL_TEST_ prefixed because they exist
+    # only for these tests: that script runs as root and rewrites the owner and
+    # the mode of every file under its target, so the name that chooses the
+    # target must not be one an operator could already have exported.
+    export WP_DIR="$WPROOT" WP_USR="$WEB_USER" WP_CACHE="$S/wp-cli-cache"
+    export KEEL_TEST_WPROOT="$WPROOT" KEEL_TEST_WP_USER="$WEB_USER"
+    export KEEL_TEST_WP_CLI="$STUBS/wp"
 }
 
 _stub() {
@@ -94,6 +103,8 @@ _runuser_command() {
     [ -f "$WP" ] && [ ! -L "$WP" ]
     [ -x "$WP" ]
     [ -L "$BIN/turnkey-wp" ]
+    # Relative, not absolute: an absolute link does not resolve inside
+    # fab-chroot, so conf.d/main would not find it at build time.
     [ "$(readlink "$BIN/turnkey-wp")" = keel-wp ]
 }
 
@@ -107,8 +118,8 @@ _runuser_command() {
 @test "keel-wp runs wp-cli as the web user, with an explicit path, never as root" {
     run "$WP" option get siteurl
     [ "$status" -eq 0 ]
-    grep -q "^runuser $WP_USR -s /bin/bash -c " "$CALLS"
-    [[ "$(_runuser_command)" == *"--path='$WPROOT'"* ]]
+    grep -q "^runuser $WEB_USER -s /bin/bash -c " "$CALLS"
+    [[ "$(_runuser_command)" == *"/usr/local/bin/wp --path='$WPROOT'"* ]]
     [[ "$(_runuser_command)" != *--allow-root* ]]
 }
 
@@ -135,7 +146,7 @@ _runuser_command() {
     run "$WP" core version
     [ "$status" -eq 0 ]
     [ -d "$WP_CACHE" ]
-    grep -q "^chown -R $WP_USR:$WP_USR $WP_CACHE\$" "$CALLS"
+    grep -q "^chown -R $WEB_USER:$WEB_USER $WP_CACHE\$" "$CALLS"
 }
 
 @test "keel-wp leaves an existing cache directory alone and still owns it" {
@@ -144,10 +155,10 @@ _runuser_command() {
     run "$WP" core version
     [ "$status" -eq 0 ]
     [ -f "$WP_CACHE/already-here" ]
-    grep -q "^chown -R $WP_USR:$WP_USR $WP_CACHE\$" "$CALLS"
+    grep -q "^chown -R $WEB_USER:$WEB_USER $WP_CACHE\$" "$CALLS"
 }
 
-@test "keel-wp reports the exit code wp-cli gave it" {
+@test "keel-wp hands back the exit code runuser gave it" {
     KEEL_TEST_RUNUSER_CODE=3 run "$WP" core verify-checksums
     [ "$status" -eq 3 ]
 }
@@ -171,13 +182,13 @@ _runuser_command() {
     [[ "$output" == *"+ runuser"* ]]
 }
 
-# --- the compatibility name, run rather than inspected -----------------------
+# --- the compatibility names, run rather than inspected ----------------------
 
 @test "turnkey-wp runs the same command keel-wp does" {
     [ -L "$BIN/turnkey-wp" ]
     run "$BIN/turnkey-wp" option get siteurl
     [ "$status" -eq 0 ]
-    grep -q "^runuser $WP_USR -s /bin/bash -c " "$CALLS"
+    grep -q "^runuser $WEB_USER -s /bin/bash -c " "$CALLS"
     [[ "$(_runuser_command)" == *"--path='$WPROOT'"* ]]
     [[ "$(_runuser_command)" == *"option get siteurl"* ]]
 }
@@ -205,10 +216,31 @@ _runuser_command() {
     root="$S/root.patched"
     mkdir -p "$root"
     cp -TdR "$REPO/overlay" "$root"
+    cp -TdR "$REPO/overlay" "$root"
     [ -L "$root/usr/local/sbin/turnkey-wordpress-update" ]
     run "$root/usr/local/sbin/turnkey-wordpress-update"
     [ "$status" -eq 0 ]
     grep -q "^wp --allow-root --path=$WPROOT core update\$" "$CALLS"
+}
+
+@test "it is -L that would flatten the link, and -d is not what prevents it" {
+    # What the overlay step has to avoid is dereferencing. -P is already the
+    # default under -R, so a plain -R keeps the link, and -d only adds
+    # --preserve=links, which is about hard links and does nothing here. That
+    # is asserted rather than left in a comment, because the comment above
+    # says the build's flags are safe and this is the reason they are.
+    plain="$S/plain"; deref="$S/deref"
+    cp -TR "$REPO/overlay" "$plain"
+    cp -TLR "$REPO/overlay" "$deref"
+    # -R without -d: still a link, and still a working command.
+    [ -L "$plain/usr/local/bin/turnkey-wp" ]
+    run "$plain/usr/local/bin/turnkey-wp" core version
+    [ "$status" -eq 0 ]
+    # -L: a second regular file, and the compatibility name stops being a link
+    # to anything. This is the flag that would break the property.
+    [ ! -L "$deref/usr/local/bin/turnkey-wp" ]
+    [ -f "$deref/usr/local/bin/turnkey-wp" ]
+    [ ! -L "$deref/usr/local/sbin/turnkey-wordpress-update" ]
 }
 
 @test "turnkey-wordpress-update refuses a non-root caller under its own name" {
@@ -224,7 +256,16 @@ _runuser_command() {
     KEEL_TEST_UID=1000 run "$UPDATE"
     [ "$status" -eq 1 ]
     [[ "$output" == *"keel-wordpress-update must run as root"* ]]
-    [ ! -s "$CALLS" ] || ! grep -q '^wp ' "$CALLS"
+    ! grep -q '^wp ' "$CALLS"
+}
+
+@test "keel-wordpress-update refuses a target that is not a WordPress" {
+    rm -f "$WPROOT/wp-includes/version.php"
+    run "$UPDATE"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not a WordPress installation"* ]]
+    ! grep -q '^wp ' "$CALLS"
+    ! grep -q '^chown ' "$CALLS"
 }
 
 @test "keel-wordpress-update updates core and then verifies the checksums" {
@@ -254,7 +295,7 @@ _runuser_command() {
     run "$UPDATE"
     [ "$status" -eq 0 ]
     grep -q "^chown -R root:root $WPROOT\$" "$CALLS"
-    grep -q "^chown root:$WP_USER $WPROOT/wp-config.php\$" "$CALLS"
+    grep -q "^chown root:$WEB_USER $WPROOT/wp-config.php\$" "$CALLS"
     [ "$(stat -c %a "$WPROOT/wp-config.php")" = 640 ]
     [ "$(stat -c %a "$WPROOT/index.php")" = 644 ]
     [ "$(stat -c %a "$WPROOT")" = 755 ]
@@ -264,8 +305,35 @@ _runuser_command() {
     run "$UPDATE"
     [ "$status" -eq 0 ]
     for dir in uploads cache upgrade plugins themes; do
-        grep -q "^install -d -o $WP_USER -g $WP_USER -m 0755 $WPROOT/wp-content/$dir\$" \
+        grep -q "^install -d -o $WEB_USER -g $WEB_USER -m 0755 $WPROOT/wp-content/$dir\$" \
             "$CALLS"
-        grep -q "^chown -R $WP_USER:$WP_USER $WPROOT/wp-content/$dir\$" "$CALLS"
+        grep -q "^chown -R $WEB_USER:$WEB_USER $WPROOT/wp-content/$dir\$" "$CALLS"
     done
+}
+
+# --- the two names that must not come from the caller's environment ----------
+
+@test "USER in the environment does not decide who owns wp-content" {
+    # The file this replaced opened `USER=www-data`, a plain assignment that
+    # masks the inherited value. Reading `${USER:-www-data}` instead would take
+    # root's login environment, where USER is root, and hand every runtime
+    # directory to root:root: uploads and plugin installs would fail from the
+    # first supervised update onwards, with nothing pointing back at it.
+    USER=root run "$UPDATE"
+    [ "$status" -eq 0 ]
+    grep -q "^chown -R $WEB_USER:$WEB_USER $WPROOT/wp-content/uploads\$" "$CALLS"
+    ! grep -q '^chown -R root:root .*wp-content' "$CALLS"
+    grep -q "^chown root:$WEB_USER $WPROOT/wp-config.php\$" "$CALLS"
+}
+
+@test "WPROOT in the environment does not decide what this script rewrites" {
+    # It runs as root and rewrites the owner and the mode of every file under
+    # its target, so the variable that chooses that target is deliberately not
+    # a name an operator could already be exporting. conf.d/main of this very
+    # repository uses WPROOT for this same path.
+    WPROOT=/ WP_USER=root WP_CLI=/bin/true run "$UPDATE"
+    [ "$status" -eq 0 ]
+    grep -q "^chown -R root:root $KEEL_TEST_WPROOT\$" "$CALLS"
+    ! grep -qx 'chown -R root:root /' "$CALLS"
+    grep -q "^wp --allow-root --path=$KEEL_TEST_WPROOT core update\$" "$CALLS"
 }

@@ -12,7 +12,6 @@
 WP_DIR=${WP_DIR:-/var/www/wordpress}
 WP_USR=${WP_USR:-www-data}
 WP_CACHE=${WP_CACHE:-/var/www/.wp-cli}
-WP_CLI=${WP_CLI:-/usr/local/bin/wp}
 
 if [[ ! -d "$WP_CACHE" ]]; then
     mkdir -p "$WP_CACHE"
@@ -20,4 +19,4 @@ fi
 chown -R "$WP_USR":"$WP_USR" "$WP_CACHE"
 
 runuser "$WP_USR" -s /bin/bash \
-                  -c "$WP_CLI --path='$WP_DIR' $(printf '%q ' "$@")"
+                  -c "/usr/local/bin/wp --path='$WP_DIR' $(printf '%q ' "$@")"
