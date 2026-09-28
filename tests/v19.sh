@@ -45,6 +45,7 @@ test "$(keel-wp post get "$post_id" --field=post_content)" = \
     qa-wordpress-persistence
 
 before=$(keel-wp core version)
+test -n "$before"
 keel-wp core check-update --format=json >"$work/update.json"
 python3 -c 'import json,sys; assert isinstance(json.load(open(sys.argv[1])), list)' \
     "$work/update.json"
@@ -57,12 +58,17 @@ fi
 
 # The compatibility names of decision 0015, exercised rather than inspected: a
 # link that resolves is not a link that works. turnkey-wp is asked the same
-# question keel-wp was just asked and has to give the same answer, and the
+# questions keel-wp was just asked and has to give the same answers, and the
 # updater's root guard has to hold under the old name too.
+#
+# Each answer is compared against a literal the script already knows, never
+# against a second command substitution: a command substitution in test's
+# arguments does not trip errexit, so comparing two of them passes as
+# test "" = "" when wp-cli is broken and both sides are empty.
 test -L /usr/local/bin/turnkey-wp
 test "$(readlink /usr/local/bin/turnkey-wp)" = keel-wp
 test "$(turnkey-wp core version)" = "$before"
-test "$(turnkey-wp option get siteurl)" = "$(keel-wp option get siteurl)"
+test "$(turnkey-wp option get siteurl)" = https://localhost
 test -L /usr/local/sbin/turnkey-wordpress-update
 test "$(readlink /usr/local/sbin/turnkey-wordpress-update)" = keel-wordpress-update
 if runuser -u www-data -- /usr/local/sbin/turnkey-wordpress-update; then
