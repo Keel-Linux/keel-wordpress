@@ -10,11 +10,20 @@ turnkey-wordpress-19.0 (4) turnkey; urgency=low
     The general rule is decision 0015 of the handbook (tracker#12).
 
   * The symlinks are committed into the overlay rather than made in
-    conf.d/main, because fab-apply-overlay copies an overlay with "cp -TdR"
-    and -d keeps a link a link. This recipe applies its overlay twice, once
-    through COMMON_OVERLAYS and once as the product-local ROOT_OVERLAY, and a
-    second copy over an existing link still leaves a link. Both facts are
-    asserted by running the copied turnkey-wp, not by looking at it.
+    conf.d/main. fab-apply-overlay copies an overlay with "cp -TdR", and what
+    keeps a symlink a symlink there is -R without -L: -P is already the
+    default under -R, and -d only adds --preserve=links, which is about hard
+    links. So the property is the absence of -L, and that is what the tests
+    assert -- a plain "cp -TR" still gives a working turnkey-wp and "cp -TLR"
+    turns it into a second regular file. This recipe also applies its overlay
+    twice, once through COMMON_OVERLAYS and once as the product-local
+    ROOT_OVERLAY, and a second copy over an existing link still leaves a link.
+    Every one of these is asserted by running the copied command, not by
+    looking at it.
+
+  * Both links are relative, turnkey-wp -> keel-wp rather than an absolute
+    path, because an absolute link does not resolve inside fab-chroot and
+    conf.d/main calls the command at build time.
 
   * Nothing about what either command does has changed. keel-wp still runs
     wp-cli through runuser as www-data, never as root, with an explicit
@@ -23,12 +32,29 @@ turnkey-wordpress-19.0 (4) turnkey; urgency=low
     per file checksums and puts the ownership boundary back. The refusal now
     names whichever of the two names was typed.
 
-  * The paths both scripts hand to another program are overridable from the
-    environment, the way keel-wp's WP_DIR, WP_USR and WP_CACHE already were,
-    so the pair can be driven against a scratch tree. The defaults are the
-    values that were hard coded, so a booted appliance behaves identically.
-    That is what let them be measured: they were at no coverage at all and
-    are now at 100 percent of their lines, every branch driven, in
+  * keel-wordpress-update reads its WordPress root, its web user and its
+    wp-cli path from KEEL_TEST_WPROOT, KEEL_TEST_WP_USER and KEEL_TEST_WP_CLI
+    when those are set, so the tests can drive it against a scratch tree. The
+    prefix is deliberate rather than decorative: the script runs as root and
+    rewrites the owner and the mode of every file under its target, so the
+    name that chooses the target must not be one an operator could already be
+    exporting for something else, and WPROOT is exactly such a name --
+    conf.d/main of this repository uses it for this same path. keel-wp gained
+    no new knob at all; its WP_DIR, WP_USR and WP_CACHE are the ones it
+    already shipped with.
+
+  * keel-wordpress-update now refuses a target that is not a WordPress, by
+    the same wp-includes/version.php that conf.d/main asserts after
+    unpacking, before it rewrites anything. It reads its web user from
+    KEEL_TEST_WP_USER and never from USER: the previous file opened
+    USER=www-data, a plain assignment that masks the inherited value, and
+    reading ${USER:-www-data} instead would take root's login environment and
+    hand every wp-content runtime directory to root, so uploads and plugin
+    installs would fail from the first supervised update onwards. Both are
+    asserted.
+
+  * That is what let both scripts be measured: they were at no coverage at
+    all and are now at 100 percent of their lines, every branch driven, in
     tests/wrappers.bats (COVERAGE.md).
 
   * conf.d/main, README.rst and tests/v19.sh call the Keel names. tests/v19.sh
