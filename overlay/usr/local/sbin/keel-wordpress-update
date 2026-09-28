@@ -1,0 +1,34 @@
+#!/bin/bash
+# A supervised WordPress core update: update core, verify WordPress's own per
+# file checksums, and put the appliance's ownership boundary back afterwards
+# (README.rst). Automatic core updates are off in wp-config.php because an
+# unsupervised update does not restore that boundary.
+#
+# The Keel name is the real command; `turnkey-wordpress-update` beside it is a
+# symlink to this file (decision 0015 of the handbook). The refusal below names
+# whichever of the two the operator typed.
+set -euo pipefail
+
+WPROOT="${WPROOT:-/var/www/wordpress}"
+WP_USER="${WP_USER:-www-data}"
+WP_CLI="${WP_CLI:-/usr/local/bin/wp}"
+me=${0##*/}
+
+test "$(id -u)" -eq 0 || {
+    echo "$me must run as root" >&2
+    exit 1
+}
+
+"$WP_CLI" --allow-root --path="$WPROOT" core update
+"$WP_CLI" --allow-root --path="$WPROOT" core verify-checksums
+
+chown -R root:root "$WPROOT"
+find "$WPROOT" -type d -exec chmod 0755 {} +
+find "$WPROOT" -type f -exec chmod 0644 {} +
+for runtime_dir in uploads cache upgrade plugins themes; do
+    install -d -o "$WP_USER" -g "$WP_USER" -m 0755 \
+        "$WPROOT/wp-content/$runtime_dir"
+    chown -R "$WP_USER:$WP_USER" "$WPROOT/wp-content/$runtime_dir"
+done
+chown root:"$WP_USER" "$WPROOT/wp-config.php"
+chmod 0640 "$WPROOT/wp-config.php"

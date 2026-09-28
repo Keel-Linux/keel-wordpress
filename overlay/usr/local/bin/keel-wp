@@ -1,0 +1,23 @@
+#!/bin/bash -e
+# wp-cli against this appliance's WordPress, run as the web server's own user
+# and never as root, with the path given explicitly so the command works from
+# any directory.
+#
+# The Keel name is the real command; `turnkey-wp` beside it is a symlink to
+# this file (decision 0015 of the handbook), so a script written against the
+# old name, or a command pasted out of TurnKey's documentation, keeps working.
+
+[[ -z "$DEBUG" ]] || set -x
+
+WP_DIR=${WP_DIR:-/var/www/wordpress}
+WP_USR=${WP_USR:-www-data}
+WP_CACHE=${WP_CACHE:-/var/www/.wp-cli}
+WP_CLI=${WP_CLI:-/usr/local/bin/wp}
+
+if [[ ! -d "$WP_CACHE" ]]; then
+    mkdir -p "$WP_CACHE"
+fi
+chown -R "$WP_USR":"$WP_USR" "$WP_CACHE"
+
+runuser "$WP_USR" -s /bin/bash \
+                  -c "$WP_CLI --path='$WP_DIR' $(printf '%q ' "$@")"
