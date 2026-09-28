@@ -4,6 +4,8 @@
 # and secret paths, and every verdict this appliance adds. lxc-info is a stub
 # first in PATH; the clock and sleep are functions. No root, no network, no LXC.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
     LIB="$BATS_TEST_DIRNAME/lib/boot-test-lib.sh"
     S="$BATS_TEST_TMPDIR"
@@ -97,10 +99,10 @@ setup() {
     [ "$(bt_container_name wordpress)" = keel-wordpress-boot-test ]
     bt_is_container_name demo.one
     bt_is_container_name 9lives
-    ! bt_is_container_name ".hidden"
-    ! bt_is_container_name ""
+    run ! bt_is_container_name ".hidden"
+    run ! bt_is_container_name ""
     bt_is_appliance_name wordpress
-    ! bt_is_appliance_name 9wordpress
+    run ! bt_is_appliance_name 9wordpress
 }
 
 # --- addresses ---------------------------------------------------------------
@@ -112,12 +114,12 @@ setup() {
 }
 
 @test "is_global_ipv6 refuses link local, loopback, multicast and IPv4" {
-    ! bt_is_global_ipv6 fe80::1
-    ! bt_is_global_ipv6 FE80::1
-    ! bt_is_global_ipv6 ::1
-    ! bt_is_global_ipv6 ff02::1
-    ! bt_is_global_ipv6 10.0.3.1
-    ! bt_is_global_ipv6 ""
+    run ! bt_is_global_ipv6 fe80::1
+    run ! bt_is_global_ipv6 FE80::1
+    run ! bt_is_global_ipv6 ::1
+    run ! bt_is_global_ipv6 ff02::1
+    run ! bt_is_global_ipv6 10.0.3.1
+    run ! bt_is_global_ipv6 ""
 }
 
 @test "global_ipv6 takes the first global address from lxc-info output" {
@@ -157,7 +159,7 @@ EOF
 @test "deadline_passed compares the elapsed time with the timeout" {
     bt_deadline_passed 100 10 110
     bt_deadline_passed 100 10 115
-    ! bt_deadline_passed 100 10 105
+    run ! bt_deadline_passed 100 10 105
 }
 
 @test "wait_for returns as soon as the command succeeds" {
@@ -193,16 +195,16 @@ EOF
 
 @test "is_ssh_banner accepts an OpenSSH banner and nothing else" {
     bt_is_ssh_banner "SSH-2.0-OpenSSH_10.0p2 Debian-8"
-    ! bt_is_ssh_banner "220 ready"
-    ! bt_is_ssh_banner ""
+    run ! bt_is_ssh_banner "220 ready"
+    run ! bt_is_ssh_banner ""
 }
 
 @test "firstboot_done_in reads the flag 98finalize clears" {
     printf 'RUN_FIRSTBOOT=true\n' > "$S/defaults"
-    ! bt_firstboot_done_in "$S/defaults"
+    run ! bt_firstboot_done_in "$S/defaults"
     printf 'RUN_FIRSTBOOT=false\n' > "$S/defaults"
     bt_firstboot_done_in "$S/defaults"
-    ! bt_firstboot_done_in "$S/nothing-here"
+    run ! bt_firstboot_done_in "$S/nothing-here"
 }
 
 # --- the container config and the container marks ----------------------------
@@ -404,9 +406,9 @@ EOF
 @test "password_in_config compares the declared password with the one in the file" {
     _config wordpress wordpress 'S3cret-value'
     bt_password_in_config "$S/wp-config.php" 'S3cret-value'
-    ! bt_password_in_config "$S/wp-config.php" 'something-else'
+    run ! bt_password_in_config "$S/wp-config.php" 'something-else'
     printf "<?php\n" > "$S/wp-config.php"
-    ! bt_password_in_config "$S/wp-config.php" 'S3cret-value'
+    run ! bt_password_in_config "$S/wp-config.php" 'S3cret-value'
 }
 
 # --- the login verdicts -----------------------------------------------------
