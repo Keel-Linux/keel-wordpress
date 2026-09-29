@@ -8,6 +8,8 @@
 # library, so kcov measures the file the appliance ships. No test needs root, a
 # database, a web server or a network.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO="$BATS_TEST_DIRNAME/.."
     HOOK="$REPO/overlay/usr/lib/inithooks/firstboot.d/40wordpress"
@@ -144,7 +146,7 @@ EOF
     grep -q "define('DB_NAME', 'wordpress');" "$WPROOT/wp-config.php"
     grep -q "define('DB_USER', 'wordpress');" "$WPROOT/wp-config.php"
     grep -q "define('DB_HOST', '\[::1\]');" "$WPROOT/wp-config.php"
-    ! grep -q "turnkey" "$WPROOT/wp-config.php"
+    run ! grep -q "turnkey" "$WPROOT/wp-config.php"
 }
 
 @test "the password never reaches the command line of wp core install" {
