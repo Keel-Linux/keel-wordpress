@@ -113,11 +113,15 @@ never what it was.
 
 ## The appliance gate
 
-`appliance / build-and-boot` runs through the organization's
+`appliance / boot-published-layer` runs through the organization's
 `test-appliance.yml` on the self-hosted `keel-lxc` runner, which fetches the
 published layer from `https://mirror.keellinux.org/layers`, verifies it,
 assembles it, boots it in LXC and runs `tests/boot-test.sh`. Nothing is built
-there.
+there, so what boots is the published layer and not this branch: a pull request
+that changes the recipe is not exercised by this check, which is why the job is
+`boot-published-layer` and not the old `build-and-boot`. A layer that has never
+been published fails it rather than passing it (keel-linux/.github pull request
+12).
 
 ### What the boot test proved against the published layer, 2026-09-27
 
@@ -207,7 +211,7 @@ never reached a machine, which is the trap docs/traps.md records:
 ## Plan
 
 - Require `tests / coverage`, `package / changelog` and
-  `appliance / build-and-boot` on `master`.
+  `appliance / boot-published-layer` on `master`.
 - Rebuild on the `apache-php` layer when it lands, which changes the parent and
   the digest and nothing else here.
 - Measure `conf.d/main`. A build time script that runs inside a chroot as root
