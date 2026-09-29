@@ -1,8 +1,9 @@
 #!/bin/bash
 # Line coverage of the shell this project writes, measured with kcov over
 # the bats suite (decision 0004). The measured files are the first boot
-# library, the first boot hook itself, the logic of the boot test, the build
-# time archive checks and the script that enables the signed archive; the bar of
+# library, the first boot hook itself, the two operator commands the overlay
+# ships, the logic of the boot test, the build time archive checks and the
+# script that enables the signed archive; the bar of
 # decision 0003 applies to all of them. Exits 1 below the threshold, 2 when a
 # tool is missing. tests/boot-test.sh is the thin main that runs keel and LXC
 # as root and is exercised by the container run in test-appliance.yml, not
@@ -24,7 +25,7 @@ done
 report="${COVERAGE_DIR:-$(mktemp -d)}"
 # The include pattern is the whitelist, so no exclude pattern is needed; an
 # exclude of /tests/ would drop tests/lib/boot-test-lib.sh with it.
-kcov --include-pattern=/lib/wordpress.sh,/firstboot.d/40wordpress,/tests/lib/boot-test-lib.sh,/bin/keel-archive-check,/conf.d/zz-project-packages,/conf.d/zzz-keel-archive \
+kcov --include-pattern=/lib/wordpress.sh,/firstboot.d/40wordpress,/overlay/usr/local/bin/keel-wp,/overlay/usr/local/sbin/keel-wordpress-update,/tests/lib/boot-test-lib.sh,/bin/keel-archive-check,/conf.d/zz-project-packages,/conf.d/zzz-keel-archive \
     "$report" bats "$here"
 
 json="$(find "$report" -mindepth 2 -maxdepth 2 -name coverage.json -not -path "*/kcov-merged/*" | head -1)"

@@ -22,7 +22,7 @@ and on top of that:
      directories intentionally contain web-writable executable code; install
      only updates and extensions you trust.
    - WordPress core is root-owned and does not update automatically. Apply a
-     supervised core update as ``root`` with ``turnkey-wordpress-update``.
+     supervised core update as ``root`` with ``keel-wordpress-update``.
      The command verifies official WordPress core checksums and restores the
      appliance ownership boundary after updating.
                
@@ -170,7 +170,7 @@ it either: it is unpacked from a release archive pinned by digest in
 checksums. WordPress core therefore updates through WordPress's own mechanism,
 either from the dashboard or, preferably on this appliance, with::
 
-    turnkey-wordpress-update
+    keel-wordpress-update
 
 which runs ``wp core update``, verifies WordPress's checksums again and puts
 the ownership boundary back: core and ``wp-config.php`` root owned, and only

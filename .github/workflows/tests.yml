@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   tests:
-    # tests/coverage.sh measures six shell files (COVERAGE.md). The threshold
+    # tests/coverage.sh measures eight shell files (COVERAGE.md). The threshold
     # is the lowest of them and is only ever raised (decision 0006). This job
     # produces the check "tests / coverage", the required status on master. The
     # job id is part of that name, so renaming it silently detaches the

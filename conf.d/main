@@ -59,7 +59,7 @@ sed -i "s|^allow_url_fopen.*|allow_url_fopen = On|" /etc/php/?.?/apache2/php.ini
 grep -q '^allow_url_fopen = On$' /etc/php/?.?/apache2/php.ini
 
 # wp-cli, pinned and verified. The first boot hook is the only thing that uses
-# it unattended, and a person uses it afterwards through turnkey-wp.
+# it unattended, and a person uses it afterwards through keel-wp.
 curl --proto '=https' --tlsv1.2 -fsSL \
     "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar" \
     -o /usr/local/bin/wp
@@ -91,7 +91,7 @@ chown -R "$WEB_USER:$WEB_USER" "$WPROOT"
 # WordPress's own per file checksums, asked of WordPress. This is the second,
 # independent check on the same bytes: the digest above says the archive is the
 # one we pinned, this says the files in it are the ones WordPress published.
-turnkey-wp core verify-checksums --version="$WP_VERSION"
+keel-wp core verify-checksums --version="$WP_VERSION"
 
 # No wp-config.php, and none is written here. Assert it, because the whole
 # point of this recipe is that the layer carries no credential.

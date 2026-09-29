@@ -1,0 +1,48 @@
+#!/bin/bash
+# A supervised WordPress core update: update core, verify WordPress's own per
+# file checksums, and put the appliance's ownership boundary back afterwards
+# (README.rst). Automatic core updates are off in wp-config.php because an
+# unsupervised update does not restore that boundary.
+#
+# The Keel name is the real command; `turnkey-wordpress-update` beside it is a
+# symlink to this file (decision 0015 of the handbook). The refusals below name
+# whichever of the two the operator typed.
+set -euo pipefail
+
+# These three are constants of the appliance. They are readable from
+# KEEL_TEST_* only so tests/wrappers.bats can drive this script against a
+# scratch tree. The prefix is not decoration: this runs as root and rewrites
+# the owner and the mode of every file under its target, so the name that
+# chooses that target must not be one an operator could already be exporting
+# for something else. WPROOT is exactly such a name -- conf.d/main of this
+# repository uses it for this same path.
+WPROOT="${KEEL_TEST_WPROOT:-/var/www/wordpress}"
+WP_USER="${KEEL_TEST_WP_USER:-www-data}"
+WP_CLI="${KEEL_TEST_WP_CLI:-/usr/local/bin/wp}"
+me=${0##*/}
+
+test "$(id -u)" -eq 0 || {
+    echo "$me must run as root" >&2
+    exit 1
+}
+
+# And the target is a WordPress before anything is rewritten, whatever chose
+# the path. conf.d/main asserts this same file after unpacking the release.
+test -f "$WPROOT/wp-includes/version.php" || {
+    echo "$me: $WPROOT is not a WordPress installation" >&2
+    exit 1
+}
+
+"$WP_CLI" --allow-root --path="$WPROOT" core update
+"$WP_CLI" --allow-root --path="$WPROOT" core verify-checksums
+
+chown -R root:root "$WPROOT"
+find "$WPROOT" -type d -exec chmod 0755 {} +
+find "$WPROOT" -type f -exec chmod 0644 {} +
+for runtime_dir in uploads cache upgrade plugins themes; do
+    install -d -o "$WP_USER" -g "$WP_USER" -m 0755 \
+        "$WPROOT/wp-content/$runtime_dir"
+    chown -R "$WP_USER:$WP_USER" "$WPROOT/wp-content/$runtime_dir"
+done
+chown root:"$WP_USER" "$WPROOT/wp-config.php"
+chmod 0640 "$WPROOT/wp-config.php"
