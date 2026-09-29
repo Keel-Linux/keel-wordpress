@@ -25,6 +25,8 @@
 # it is run through a copy of the overlay made the way the build makes it
 # (`cp -TdR`, which is what fab-apply-overlay executes).
 
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO="$BATS_TEST_DIRNAME/.."
     BIN="$REPO/overlay/usr/local/bin"
@@ -256,7 +258,7 @@ _runuser_command() {
     KEEL_TEST_UID=1000 run "$UPDATE"
     [ "$status" -eq 1 ]
     [[ "$output" == *"keel-wordpress-update must run as root"* ]]
-    ! grep -q '^wp ' "$CALLS"
+    run ! grep -q '^wp ' "$CALLS"
 }
 
 @test "keel-wordpress-update refuses a target that is not a WordPress" {
@@ -264,8 +266,8 @@ _runuser_command() {
     run "$UPDATE"
     [ "$status" -eq 1 ]
     [[ "$output" == *"is not a WordPress installation"* ]]
-    ! grep -q '^wp ' "$CALLS"
-    ! grep -q '^chown ' "$CALLS"
+    run ! grep -q '^wp ' "$CALLS"
+    run ! grep -q '^chown ' "$CALLS"
 }
 
 @test "keel-wordpress-update updates core and then verifies the checksums" {
@@ -280,7 +282,7 @@ _runuser_command() {
         run "$UPDATE"
     [ "$status" -eq 1 ]
     grep -q "^wp --allow-root --path=$WPROOT core update\$" "$CALLS"
-    ! grep -q 'verify-checksums' "$CALLS"
+    run ! grep -q 'verify-checksums' "$CALLS"
 }
 
 @test "keel-wordpress-update stops when the checksums do not verify" {
@@ -288,7 +290,7 @@ _runuser_command() {
         run "$UPDATE"
     [ "$status" -eq 1 ]
     grep -q "^wp --allow-root --path=$WPROOT core verify-checksums\$" "$CALLS"
-    ! grep -q '^chown -R root:root' "$CALLS"
+    run ! grep -q '^chown -R root:root' "$CALLS"
 }
 
 @test "keel-wordpress-update puts the ownership boundary back" {
@@ -322,7 +324,7 @@ _runuser_command() {
     USER=root run "$UPDATE"
     [ "$status" -eq 0 ]
     grep -q "^chown -R $WEB_USER:$WEB_USER $WPROOT/wp-content/uploads\$" "$CALLS"
-    ! grep -q '^chown -R root:root .*wp-content' "$CALLS"
+    run ! grep -q '^chown -R root:root .*wp-content' "$CALLS"
     grep -q "^chown root:$WEB_USER $WPROOT/wp-config.php\$" "$CALLS"
 }
 
@@ -334,6 +336,6 @@ _runuser_command() {
     WPROOT=/ WP_USER=root WP_CLI=/bin/true run "$UPDATE"
     [ "$status" -eq 0 ]
     grep -q "^chown -R root:root $KEEL_TEST_WPROOT\$" "$CALLS"
-    ! grep -qx 'chown -R root:root /' "$CALLS"
+    run ! grep -qx 'chown -R root:root /' "$CALLS"
     grep -q "^wp --allow-root --path=$KEEL_TEST_WPROOT core update\$" "$CALLS"
 }
