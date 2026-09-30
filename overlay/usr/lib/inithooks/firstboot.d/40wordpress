@@ -141,7 +141,12 @@ WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
     || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
 
 # The web server serves the site from now on. It is started rather than
-# assumed, because nothing before this hook needed it.
+# assumed, because nothing before this hook needed it. Its configuration is
+# checked first, here and not at build time: the certificate both virtual
+# hosts name is made by 15regen-sslcert on this machine, so this is the first
+# moment the check can pass for the right reason.
+apache2ctl configtest \
+    || fatal "the Apache configuration does not pass apache2ctl configtest"
 systemctl restart "$WORDPRESS_WEB_SERVICE.service" \
     || fatal "$WORDPRESS_WEB_SERVICE did not start"
 

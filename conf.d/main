@@ -152,9 +152,20 @@ fi
 grep -Eq '^SSLCipherSuite +[A-Za-z0-9]' "$SSL_CONF" \
     || fatal "$SSL_CONF has no cipher suite"
 
-# And the behaviour rather than the settings: Apache is asked whether it would
-# start with this configuration.
-apache2ctl configtest
+# Apache is not asked here whether it would start. wordpress.conf and
+# mods-available/ssl.conf both name /etc/ssl/private/cert.pem, and on common
+# 19.x no layer carries that file: removelists-final takes every private key
+# out of the image and the machine makes its own at the first boot
+# (15regen-sslcert). The parent layer arrives without it, so a configtest here
+# can only fail, or pass on a certificate made for the purpose that would then
+# have to be removed again. The question is asked where the answer means
+# something: firstboot.d/40wordpress runs apache2ctl configtest after the
+# certificate exists and before it restarts Apache, the way keel-nodebb runs
+# nginx -t in its own hook, and the boot test proves the site answers on 443.
+# What this script can still assert is that it did not put a key back.
+for key in /etc/ssl/private/cert.pem /etc/ssl/private/cert.key; do
+    [ ! -e "$key" ] || fatal "$key is in the layer; the machine makes its own at first boot"
+done
 
 # fab-plan-resolve keeps a package the parent layer already carries at the
 # parent's version, so the two core packages are upgraded here from the build

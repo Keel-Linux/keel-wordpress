@@ -1,3 +1,21 @@
+turnkey-wordpress-19.0 (6) turnkey; urgency=medium
+
+  * The layer builds again on common 19.x. conf.d/main ran
+    apache2ctl configtest, and both the WordPress virtual host on 443 and
+    mods-available/ssl.conf name /etc/ssl/private/cert.pem, which no layer
+    carries any more: common's removelists-final takes every private key
+    out of the image and the machine makes its own at the first boot
+    (keel-core#8). The parent layer arrives without it, so the check could
+    only fail. It now runs in firstboot.d/40wordpress, after
+    15regen-sslcert has made the certificate and before Apache is
+    restarted, the way keel-nodebb runs nginx -t in its own hook; a
+    configuration that does not pass stops the first boot with a message.
+    conf.d/main asserts instead that it left no cert.pem or cert.key in the
+    layer, and the boot test reads the assembled image before it boots and
+    fails on any certificate or private key in it.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Wed, 30 Sep 2026 12:00:00 +0000
+
 turnkey-wordpress-19.0 (5) turnkey; urgency=medium
 
   * bin/wordpress.py draws its password boxes on the terminal.

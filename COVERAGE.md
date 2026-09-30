@@ -9,10 +9,10 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | File | Test | Lines | Note |
 | --- | --- | --- | --- |
 | `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (40 tests) | 99.00 percent (99/100) under kcov | every function and every branch |
-| `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (29 tests) | 97.73 percent (43/44) under kcov | the hook itself, run for real |
+| `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (31 tests) | 97.78 percent (44/45) under kcov | the hook itself, run for real, including apache2ctl configtest before the restart and a failing configtest that stops it |
 | `overlay/usr/local/bin/keel-wp` | `tests/wrappers.bats` (25 tests) | 100 percent (8/8) under kcov | both cache branches, the quoting, the exit code it hands back, `DEBUG`, and the `turnkey-wp` link run for real |
 | `overlay/usr/local/sbin/keel-wordpress-update` | `tests/wrappers.bats` (the same 25) | 100 percent (21/21) under kcov | both guards refused and satisfied, each wp-cli call made to fail, the whole ownership boundary, and the two names it must not take from the environment |
-| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (73 tests) | 98.95 percent (282/285) under kcov | parsing, addresses, deadlines, the container marks, every verdict, and the image carrying none of the build time archive files |
+| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (79 tests) | 98.99 percent (293/296) under kcov | parsing, addresses, deadlines, the container marks, every verdict, the image carrying none of the build time archive files, and none of the certificates and keys common removes |
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (13 tests) | 100 percent (26/26) under kcov | every way it enables and every way it refuses, including a staging keyring left in the image |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (14 tests) | 100 percent (31/31) under kcov | shared with keel-nodebb, where the pattern is maintained |
 | `bin/keel-archive-check` | `tests/archive-check.bats` (27 tests) | 100 percent (54/54) under kcov | the build time check of tracker#7: the copy is the live archive, the entry names the keyring through signed-by, nothing says trusted=yes, and the copied InRelease verifies against the staging key |
@@ -21,7 +21,7 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the eight measured shell files: **99.12 percent (564/569)**, 221
+Total over the eight measured shell files: **99.14 percent (576/581)**, 232
 bats tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
@@ -33,8 +33,8 @@ sets to **97**, the lowest measured file. It is only ever raised (decision
      100.00  31/31  zz-project-packages
      100.00  26/26  zzz-keel-archive
       99.00  99/100  wordpress.sh
-      97.73  43/44  40wordpress
-      98.95  282/285  boot-test-lib.sh
+      97.78  44/45  40wordpress
+      98.99  293/296  boot-test-lib.sh
      100.00  54/54  keel-archive-check
 
 ### The two operator commands, and the link beside each
