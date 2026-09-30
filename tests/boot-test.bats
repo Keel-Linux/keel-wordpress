@@ -606,6 +606,43 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "policy_verdict reads apt's own layout for an installed candidate" {
+    # what apt-cache policy printed inside the appliance in the boot gate on
+    # 2026-09-30, once the gate could reach the archive (tracker#5): one line
+    # for the version, marked ***, and both of its sources under it
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+keel5
+  Candidate: 2.3.6+keel5
+  Version table:
+ *** 2.3.6+keel5 1001
+       1001 https://archive.keellinux.org trixie/main amd64 Packages
+        100 /var/lib/dpkg/status
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"candidate 2.3.6+keel5"* ]]
+}
+
+@test "policy_verdict refuses an installed candidate from another source at our pin" {
+    # a repository that calls itself our origin gets our pin too; the
+    # candidate must come from our archive, not merely share its priority
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+evil
+  Candidate: 2.3.6+evil
+  Version table:
+ *** 2.3.6+evil 1001
+       1001 http://mirror.example.org trixie/main amd64 Packages
+        100 /var/lib/dpkg/status
+     2.3.6+keel5 1001
+       1001 https://archive.keellinux.org trixie/main amd64 Packages
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not come from"* ]]
+}
+
 @test "policy_verdict refuses a package apt has no candidate for" {
     printf 'inithooks:\n  Installed: (none)\n  Candidate: (none)\n' > "$S/policy"
     run bt_policy_verdict inithooks "$S/policy"
