@@ -25,6 +25,10 @@ the spec.
 - `wordpress.bats`: unit tests of
   `overlay/usr/lib/inithooks/lib/wordpress.sh`, the logic behind the first boot
   hook `40wordpress`.
+- `dialog.bats`: `overlay/usr/lib/inithooks/bin/wordpress.py` run as the hook
+  runs it, output redirected, inside a pseudo terminal (`script`), with a
+  stand-in for libinithooks whose dialog refuses to draw anywhere but a
+  terminal: the answers go to the hook and the box to the screen.
 - `hook.bats`: the hook itself, executed for real against scratch directories
   with `systemctl`, `mysqladmin`, `mysql`, `php`, `wp`, `chown` and `openssl`
   as `PATH` stubs that log every call, and a scratch `INITHOOKS_PATH` whose
@@ -63,6 +67,7 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     bats tests/wrappers.bats
     bats tests/boot-test.bats
     bats tests/keel-archive.bats
+    bats tests/dialog.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
 `COVERAGE_DIR=coverage tests/coverage.sh` keeps the kcov reports, one directory

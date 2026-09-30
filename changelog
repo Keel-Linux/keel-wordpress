@@ -1,3 +1,16 @@
+turnkey-wordpress-19.0 (5) turnkey; urgency=medium
+
+  * bin/wordpress.py draws its password boxes on the terminal.
+    firstboot.d/40wordpress reads the script's standard output for
+    APP_PASS= and DB_PASS=, and dialog draws on standard output, so an
+    interactive first boot would freeze at the WordPress password with the
+    box drawn into the hook's pipe, as it did at the MariaDB password
+    (keel-wordpress 19.0-3 on Proxmox, 2026-09-30). The answers now go to a
+    copy of that pipe and standard output is the terminal. tests/dialog.bats
+    runs the script as the hook does, inside a pseudo terminal.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Wed, 30 Sep 2026 04:30:00 +0000
+
 turnkey-wordpress-19.0 (4) turnkey; urgency=low
 
   * The two operator commands this appliance writes itself now carry the

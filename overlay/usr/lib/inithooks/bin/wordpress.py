@@ -11,9 +11,12 @@ description.
 Syntax: wordpress.py NAME [NAME ...]     NAME is APP_PASS or DB_PASS
 """
 
+import os
 import sys
 
 from libinithooks.dialog_wrapper import Dialog
+
+TTY = "/dev/tty"
 
 TITLE = "Keel - First boot configuration"
 
@@ -38,14 +41,49 @@ def ask(name: str, dialog: Dialog) -> str:
     return dialog.get_password(title, text)
 
 
+def terminal_path(tty: str = TTY) -> str:
+    """The terminal to draw on: the one the hook checked on standard input,
+    else the controlling terminal"""
+    try:
+        return os.ttyname(sys.stdin.fileno())
+    except OSError:
+        return tty
+
+
+def answers_out(tty: str = TTY):
+    """The hook's pipe for the answers, with standard output on the terminal
+
+    The hook reads this script's standard output, and dialog draws its
+    screen on standard output: left there, the password box is drawn into
+    the hook's pipe, and the console shows a frozen screen waiting for a
+    password nobody can see (2026-09-30, keel-wordpress on Proxmox). So
+    the pipe is kept on a new descriptor for the KEY=value lines, and
+    standard output, which dialog inherits, becomes the terminal.
+    """
+    path = terminal_path(tty)
+    try:
+        terminal = os.open(path, os.O_WRONLY)
+    except OSError as e:
+        raise SystemExit(
+            f"wordpress.py: no terminal to draw the dialog on ({path}:"
+            f" {e.strerror}); declare secrets.app_password and"
+            " secrets.db_password in the instance description instead")
+    answers = os.fdopen(os.dup(sys.stdout.fileno()), "w")
+    os.dup2(terminal, sys.stdout.fileno())
+    os.close(terminal)
+    return answers
+
+
 def main(names: list[str]) -> int:
     """Print one KEY=value line per requested name."""
     if not names:
         print(__doc__, file=sys.stderr)
         return 1
+    answers = answers_out()
     dialog = Dialog(TITLE)
     for name in names:
-        print(f"{name}={ask(name, dialog)}")
+        print(f"{name}={ask(name, dialog)}", file=answers)
+    answers.close()
     return 0
 
 
