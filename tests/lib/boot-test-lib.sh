@@ -54,6 +54,21 @@ BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 BT_BUILD_LEFTOVERS="srv/keel-apt
 etc/apt/sources.list.d/keel-staging.list
 etc/apt/keyrings/keel-staging-keyring.asc"
+# The certificates and private keys no layer may carry, relative to the rootfs
+# and globbed: the list common/removelists-final/turnkey removes (keel-core#8).
+# Every machine built from a layer holds the same bytes, so a key left in one
+# is a key every machine shares; the machine makes its own at the first boot.
+# Read on the assembled tree before it boots, because after the first boot
+# every one of them exists again, made on the machine.
+BT_SHARED_KEYS="etc/ssl/private/cert.pem
+etc/ssl/private/cert.key
+etc/ssl/private/ssl-cert-snakeoil.key
+etc/ssl/certs/ssl-cert-snakeoil.pem
+etc/webmin/miniserv.pem
+usr/share/turnkey-ssl/cert.pem
+usr/share/turnkey-ssl/cert.key
+etc/ssh/ssh_host_*_key
+etc/ssh/ssh_host_*_key.pub"
 # What the two update proofs use, beyond apt-get update itself.
 #
 # A project package the image already carries, to show that apt would take its
@@ -545,6 +560,44 @@ bt_build_leftovers_verdict() {
     done <<< "$BT_BUILD_LEFTOVERS"
     [ "$found" -eq 0 ] || return 1
     echo "boot-test: no build time package source, archive copy or staging keyring in the image"
+}
+
+bt_shared_keys_verdict() {
+    # bt_shared_keys_verdict ROOTFS: the assembled image, not yet booted,
+    # carries no certificate or private key. conf.d/main no longer runs
+    # apache2ctl configtest because of exactly this, so the absence is what
+    # the test asserts, and every file found is named.
+    local rootfs=$1 pattern path found=0
+    while read -r pattern; do
+        [ -n "$pattern" ] || continue
+        for path in "$rootfs"/$pattern; do
+            [ -e "$path" ] || [ -L "$path" ] || continue
+            echo "boot-test: the image carries /${path#"$rootfs"/}, a key every machine would share" >&2
+            found=1
+        done
+    done <<< "$BT_SHARED_KEYS"
+    [ "$found" -eq 0 ] || return 1
+    echo "boot-test: no certificate or private key in the image"
+}
+
+bt_configtest_verdict() {
+    # bt_configtest_verdict LOG: 40wordpress ran apache2ctl configtest on the
+    # booted machine and it passed. conf.d/main no longer runs it, so the
+    # inithooks log is the only record that the check happened at all.
+    local log=$1
+    if [ ! -r "$log" ]; then
+        echo "boot-test: no inithooks log at $log" >&2
+        return 1
+    fi
+    if grep -q 'does not pass apache2ctl configtest' "$log"; then
+        echo "boot-test: 40wordpress reports a failed apache2ctl configtest" >&2
+        return 1
+    fi
+    if ! grep -q 'Apache configuration passed apache2ctl configtest' "$log"; then
+        echo "boot-test: the inithooks log does not show apache2ctl configtest passing" >&2
+        return 1
+    fi
+    echo "boot-test: 40wordpress ran apache2ctl configtest and it passed"
 }
 
 bt_sources_verdict() {

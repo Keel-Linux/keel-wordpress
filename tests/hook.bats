@@ -2,8 +2,8 @@
 # Unit tests of overlay/usr/lib/inithooks/firstboot.d/40wordpress, the first
 # boot hook, executed for real against scratch directories.
 #
-# Everything it touches is a stub first in PATH (systemctl, mysqladmin, mysql,
-# php, wp, chown, openssl) writing a line per call into a log the tests read,
+# Everything it touches is a stub first in PATH (systemctl, apache2ctl,
+# mysqladmin, mysql, php, wp, chown, openssl) writing a line per call into a log the tests read,
 # and INITHOOKS_PATH is a scratch tree whose lib is a symlink to the real
 # library, so kcov measures the file the appliance ships. No test needs root, a
 # database, a web server or a network.
@@ -45,6 +45,7 @@ EOF
     STUBS="$SCRATCH/bin"
     mkdir -p "$STUBS"
     _stub systemctl 0
+    _stub apache2ctl "\${WP_TEST_CONFIGTEST_RC:-0}"
     _stub chown 0
     _stub mysqladmin 0
     # openssl is only used for the throwaway password
@@ -182,6 +183,26 @@ EOF
     run bash "$HOOK"
     [ "$status" -eq 0 ]
     grep -q "systemctl restart apache2.service" "$CALLS"
+}
+
+@test "the Apache configuration is tested before the web server is restarted" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    configtest=$(grep -n "^apache2ctl configtest$" "$CALLS" | cut -d: -f1)
+    restart=$(grep -n "^systemctl restart apache2.service$" "$CALLS" | cut -d: -f1)
+    [ -n "$configtest" ]
+    [ -n "$restart" ]
+    [ "$configtest" -lt "$restart" ]
+    [[ "$output" == *"Apache configuration passed apache2ctl configtest"* ]]
+}
+
+@test "a configuration that fails configtest is fatal and Apache is not restarted" {
+    export WP_TEST_CONFIGTEST_RC=1
+    run bash "$HOOK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"does not pass apache2ctl configtest"* ]]
+    grep -q "^apache2ctl configtest$" "$CALLS"
+    run ! grep -q "systemctl restart apache2.service" "$CALLS"
 }
 
 @test "the rendered wp-config.php is checked as PHP before it is moved into place" {
