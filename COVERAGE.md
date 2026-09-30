@@ -16,7 +16,7 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (13 tests) | 100 percent (26/26) under kcov | every way it enables and every way it refuses, including a staging keyring left in the image |
 | `conf.d/zz-project-packages` | `tests/project-packages.bats` (14 tests) | 100 percent (31/31) under kcov | shared with keel-nodebb, where the pattern is maintained |
 | `bin/keel-archive-check` | `tests/archive-check.bats` (27 tests) | 100 percent (54/54) under kcov | the build time check of tracker#7: the copy is the live archive, the entry names the keyring through signed-by, nothing says trusted=yes, and the copied InRelease verifies against the staging key |
-| `overlay/usr/lib/inithooks/bin/wordpress.py` | none | 0 | dialog wrapper, only reached with a terminal attached |
+| `overlay/usr/lib/inithooks/bin/wordpress.py` | `tests/dialog.bats` (3 tests) | not measured (kcov measures the shell) | dialog wrapper, run as the hook runs it inside a pseudo terminal: the answers reach the hook and the boxes are drawn on the terminal |
 | `overlay/usr/lib/inithooks/lib/*.php` | the boot test | integration only | two PHP files `wp eval-file` runs; `conf.d/main` has PHP lint them |
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
