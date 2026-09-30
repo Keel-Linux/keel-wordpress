@@ -62,6 +62,8 @@ etc/apt/keyrings/keel-staging-keyring.asc"
 # sets.
 BT_POLICY_PACKAGE="inithooks"
 BT_ARCHIVE_PIN=1001
+# Where this library and the awk programs beside it live.
+BT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # And the package path itself, in two steps, neither of which needs a version
 # newer than the image to exist. Requiring one would mean either inventing a
 # release or shipping the image deliberately stale so the archive is always
@@ -635,19 +637,11 @@ bt_policy_verdict() {
         echo "boot-test: $BT_ARCHIVE_URI is not a source of $package at priority $BT_ARCHIVE_PIN" >&2
         return 1
     fi
-    # The candidate's own block of the version table has to list our archive
-    # at our pin: the number on a version line is only the highest priority
-    # of its sources, so it does not say which source the version comes
-    # from. apt marks the installed version with *** in front of it (a
-    # current appliance: " *** 2.3.6+keel5 1001"); the marker is dropped.
+    # the candidate's own block of the version table has to list our archive
+    # at our pin (candidate-source.awk says why)
     if ! awk -v version="$candidate" -v pin="$BT_ARCHIVE_PIN" \
-        -v uri="$BT_ARCHIVE_URI" '
-        { if ($1 == "***") { $1 = ""; $0 = $0 } }
-        $1 == "Version" && $2 == "table:" { table = 1; next }
-        !table { next }
-        NF == 2 && $2 ~ /^-?[0-9]+$/ && $1 !~ /^-?[0-9]+$/ { cur = $1; next }
-        cur == version && $1 == pin && $2 == uri { found = 1 }
-        END { exit !found }' "$file"; then
+        -v uri="$BT_ARCHIVE_URI" -f "$BT_LIB_DIR/candidate-source.awk" \
+        "$file"; then
         echo "boot-test: the candidate $package $candidate does not come from" \
             "$BT_ARCHIVE_URI at priority $BT_ARCHIVE_PIN" >&2
         return 1
