@@ -9,7 +9,9 @@ turnkey-wordpress-19.0 (6) turnkey; urgency=medium
     only fail. It now runs in firstboot.d/40wordpress, after
     15regen-sslcert has made the certificate and before Apache is
     restarted, the way keel-nodebb runs nginx -t in its own hook; a
-    configuration that does not pass stops the first boot with a message.
+    configuration that does not pass is fatal to 40wordpress, which then
+    does not restart Apache (inithooks logs the failure and runs the next
+    hook). The boot test reads the inithooks log for the configtest line.
     conf.d/main asserts instead that it left no cert.pem or cert.key in the
     layer, and the boot test reads the assembled image before it boots and
     fails on any certificate or private key in it.

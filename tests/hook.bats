@@ -193,6 +193,7 @@ EOF
     [ -n "$configtest" ]
     [ -n "$restart" ]
     [ "$configtest" -lt "$restart" ]
+    [[ "$output" == *"Apache configuration passed apache2ctl configtest"* ]]
 }
 
 @test "a configuration that fails configtest is fatal and Apache is not restarted" {

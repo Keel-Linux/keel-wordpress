@@ -537,6 +537,50 @@ EOF
     [[ "$output" == *"no certificate or private key in the image"* ]]
 }
 
+@test "shared_keys_verdict passes public trust stores and client config beside the keys" {
+    install -D /dev/null "$S/rootfs/etc/ssl/certs/ca-certificates.crt"
+    install -D /dev/null "$S/rootfs/etc/ssh/ssh_config"
+    install -D /dev/null "$S/rootfs/etc/ssh/sshd_config"
+    run bt_shared_keys_verdict "$S/rootfs"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"the image carries"* ]]
+}
+
+@test "shared_keys_verdict names a dangling symlink where a key would be" {
+    mkdir -p "$S/rootfs/etc/ssl/private"
+    ln -s /nonexistent/cert.pem "$S/rootfs/etc/ssl/private/cert.pem"
+    run bt_shared_keys_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the image carries /etc/ssl/private/cert.pem"* ]]
+}
+
+@test "configtest_verdict passes when 40wordpress logged a passing configtest" {
+    printf 'Syntax OK\nApache configuration passed apache2ctl configtest\n' > "$S/inithooks.log"
+    run bt_configtest_verdict "$S/inithooks.log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ran apache2ctl configtest and it passed"* ]]
+}
+
+@test "configtest_verdict refuses a log with a failed configtest" {
+    printf 'fatal [40wordpress]: the Apache configuration does not pass apache2ctl configtest\n' > "$S/inithooks.log"
+    run bt_configtest_verdict "$S/inithooks.log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"reports a failed apache2ctl configtest"* ]]
+}
+
+@test "configtest_verdict refuses a log where configtest never ran" {
+    printf 'Syntax OK\n' > "$S/inithooks.log"
+    run bt_configtest_verdict "$S/inithooks.log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not show apache2ctl configtest passing"* ]]
+}
+
+@test "configtest_verdict refuses a missing log" {
+    run bt_configtest_verdict "$S/no-such.log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no inithooks log"* ]]
+}
+
 @test "shared_keys_verdict names the cert.pem Apache reads" {
     install -D /dev/null "$S/rootfs/etc/ssl/private/cert.pem"
     run bt_shared_keys_verdict "$S/rootfs"

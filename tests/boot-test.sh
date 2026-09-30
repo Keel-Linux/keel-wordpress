@@ -28,7 +28,9 @@
 #   8. keel diff reports no drift between the spec and the machine
 #
 # And before any of that, on the assembled tree before it boots: the image
-# carries no certificate or private key, since the machine makes its own.
+# carries no certificate or private key, since the machine makes its own. And
+# right after the first boot: the inithooks log shows 40wordpress ran
+# apache2ctl configtest and it passed.
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
 # verify; runnable by hand as root on any host with LXC, see tests/README.md.
@@ -138,6 +140,7 @@ first_boot_done() {
 bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" "the first boot of $BT_NAME to finish" \
     first_boot_done
 log "first boot finished; ssh root@$addr"
+bt_configtest_verdict "$BT_ROOTFS/var/log/inithooks.log"
 
 # 6. The site answers on both ports. WordPress is up as soon as Apache is, but
 #    40wordpress restarts Apache at the end of the first boot, so the page is

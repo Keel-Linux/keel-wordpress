@@ -571,13 +571,33 @@ bt_shared_keys_verdict() {
     while read -r pattern; do
         [ -n "$pattern" ] || continue
         for path in "$rootfs"/$pattern; do
-            [ -e "$path" ] || continue
+            [ -e "$path" ] || [ -L "$path" ] || continue
             echo "boot-test: the image carries /${path#"$rootfs"/}, a key every machine would share" >&2
             found=1
         done
     done <<< "$BT_SHARED_KEYS"
     [ "$found" -eq 0 ] || return 1
     echo "boot-test: no certificate or private key in the image"
+}
+
+bt_configtest_verdict() {
+    # bt_configtest_verdict LOG: 40wordpress ran apache2ctl configtest on the
+    # booted machine and it passed. conf.d/main no longer runs it, so the
+    # inithooks log is the only record that the check happened at all.
+    local log=$1
+    if [ ! -r "$log" ]; then
+        echo "boot-test: no inithooks log at $log" >&2
+        return 1
+    fi
+    if grep -q 'does not pass apache2ctl configtest' "$log"; then
+        echo "boot-test: 40wordpress reports a failed apache2ctl configtest" >&2
+        return 1
+    fi
+    if ! grep -q 'Apache configuration passed apache2ctl configtest' "$log"; then
+        echo "boot-test: the inithooks log does not show apache2ctl configtest passing" >&2
+        return 1
+    fi
+    echo "boot-test: 40wordpress ran apache2ctl configtest and it passed"
 }
 
 bt_sources_verdict() {
