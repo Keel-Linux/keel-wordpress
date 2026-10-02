@@ -1,3 +1,25 @@
+turnkey-wordpress-19.0 (6) turnkey; urgency=medium
+
+  * The overlay no longer ships /etc/apt/sources.list.d/keel.sources or
+    /etc/apt/preferences.d/keel (the Keel origin at 1001). At 1001 apt
+    downgraded every package newer than the archive's (tracker#23; COVERAGE.md
+    measured keel-archive-keyring 0.1.1 going back to 0.1.0), and both files,
+    at the paths common uses, would override the source and the 990 pin
+    Keel-Linux/common#30 ships. conf.d/zzz-keel-archive now verifies
+    common's source and pin and changes nothing, writes the same two files
+    (stable enabled, testing disabled, pin 990) on a bootstrap from before
+    common shipped them, refuses any other pin priority, and no longer
+    enables every Enabled: no line, which would have turned on the testing
+    track. The build time archive still wins over TurnKey's 999 pin during
+    the build: conf.d/main pins it by its Label, l=Keel Linux staging, at
+    1001, and conf.d/zz-project-packages removes that pin with the build time
+    source and fails if any apt file of the image still names that archive.
+    The boot test expects the archive at 990, reads only the stable stanza
+    of keel.sources, and accepts an installed project package newer than the
+    archive's that apt keeps, which is the no downgrade case.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 02 Oct 2026 17:00:00 +0000
+
 turnkey-wordpress-19.0 (5) turnkey; urgency=medium
 
   * bin/wordpress.py draws its password boxes on the terminal.

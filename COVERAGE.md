@@ -12,16 +12,16 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (29 tests) | 97.73 percent (43/44) under kcov | the hook itself, run for real |
 | `overlay/usr/local/bin/keel-wp` | `tests/wrappers.bats` (25 tests) | 100 percent (8/8) under kcov | both cache branches, the quoting, the exit code it hands back, `DEBUG`, and the `turnkey-wp` link run for real |
 | `overlay/usr/local/sbin/keel-wordpress-update` | `tests/wrappers.bats` (the same 25) | 100 percent (21/21) under kcov | both guards refused and satisfied, each wp-cli call made to fail, the whole ownership boundary, and the two names it must not take from the environment |
-| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (73 tests) | 98.95 percent (282/285) under kcov | parsing, addresses, deadlines, the container marks, every verdict, and the image carrying none of the build time archive files |
-| `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (13 tests) | 100 percent (26/26) under kcov | every way it enables and every way it refuses, including a staging keyring left in the image |
-| `conf.d/zz-project-packages` | `tests/project-packages.bats` (14 tests) | 100 percent (31/31) under kcov | shared with keel-nodebb, where the pattern is maintained |
+| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (79 tests) | 99.32 percent (292/294) under kcov | parsing, addresses, deadlines, the container marks, every verdict, and the image carrying none of the build time archive files |
+| `conf.d/zzz-keel-archive` | `tests/keel-archive.bats` (17 tests) | 100 percent (37/37) under kcov | common's source and 990 pin verified and left alone, both written where common did not ship them, a 1001 pin refused, testing never enabled, and every way it refuses, including a staging keyring left in the image |
+| `conf.d/zz-project-packages` | `tests/project-packages.bats` (16 tests) | 100 percent (35/35) under kcov | shared with keel-nodebb, where the pattern is maintained |
 | `bin/keel-archive-check` | `tests/archive-check.bats` (27 tests) | 100 percent (54/54) under kcov | the build time check of tracker#7: the copy is the live archive, the entry names the keyring through signed-by, nothing says trusted=yes, and the copied InRelease verifies against the staging key |
 | `overlay/usr/lib/inithooks/bin/wordpress.py` | `tests/dialog.bats` (3 tests) | not measured (kcov measures the shell) | dialog wrapper, run as the hook runs it inside a pseudo terminal: the answers reach the hook and the boxes are drawn on the terminal |
 | `overlay/usr/lib/inithooks/lib/*.php` | the boot test | integration only | two PHP files `wp eval-file` runs; `conf.d/main` has PHP lint them |
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the eight measured shell files: **99.12 percent (564/569)**, 221
+Total over the eight measured shell files: **99.33 percent (589/593)**, 239
 bats tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which the workflow
 sets to **97**, the lowest measured file. It is only ever raised (decision
 0006).
@@ -30,11 +30,11 @@ sets to **97**, the lowest measured file. It is only ever raised (decision
     kcov line coverage (threshold 97 percent):
      100.00  21/21  keel-wordpress-update
      100.00  8/8  keel-wp
-     100.00  31/31  zz-project-packages
-     100.00  26/26  zzz-keel-archive
+     100.00  35/35  zz-project-packages
+     100.00  37/37  zzz-keel-archive
       99.00  99/100  wordpress.sh
       97.73  43/44  40wordpress
-      98.95  282/285  boot-test-lib.sh
+      99.32  292/294  boot-test-lib.sh
      100.00  54/54  keel-archive-check
 
 ### The two operator commands, and the link beside each
@@ -143,7 +143,7 @@ boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
 boot-test: a wrong password was refused
 boot-test: https://archive.keellinux.org trixie is enabled and verified with /usr/share/keyrings/keel-archive-keyring.gpg
 boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
-boot-test: apt takes inithooks from https://archive.keellinux.org at priority 1001, candidate 2.3.6+keel5
+boot-test: apt takes inithooks from https://archive.keellinux.org at priority 990, candidate 2.3.6+keel5
 boot-test: keel-transition is not in the image, which is what makes the next step a proof
 boot-test: the keel-transition archive is 13836 bytes
 boot-test: apt fetched keel-transition from https://archive.keellinux.org, against the digest of the signed index
@@ -168,7 +168,7 @@ the image deliberately stale so the archive is always ahead. Both would be
 lies told to make a test pass.
 
 The second is also dangerous here, and measuring it is what settled the
-argument. `/etc/apt/preferences.d/keel` pins our origin at **1001**, the
+argument. `/etc/apt/preferences.d/keel` pinned our origin at **1001**, the
 priority that downgrades as well as upgrades. With the image one release ahead
 of the archive:
 
@@ -181,8 +181,12 @@ The following packages will be DOWNGRADED:
 
 and `keel-archive-keyring 0.1.0` ships only the **revoked** signing subkey
 `694DE5E8`, so the appliance would have lost the ability to verify the archive
-at all. The rule that follows is the one the policy check now guards: **an
-image must not carry a project package the signed archive has not got.**
+at all. The rule that followed was: **an image must not carry a project
+package the signed archive has not got.** The pin is now 990 (tracker#23,
+Keel-Linux/common#30), below 1000, so apt keeps a newer installed version
+instead of downgrading it, and the policy check accepts exactly that case: the
+candidate is the installed version alone, newer than the archive's, from no
+other source.
 
 So the test asserts the path instead of the increment, in four steps that are
 all true today: `apt-get update` verifies the archive's signature;

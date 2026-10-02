@@ -493,6 +493,15 @@ EOF
     [[ "$output" == *"is enabled and verified with"* ]]
 }
 
+@test "sources_verdict passes on common's file, the testing track beside it disabled" {
+    _sources
+    printf '\nTypes: deb\nURIs: https://archive.keellinux.org\nSuites: trixie-testing\nComponents: main\nEnabled: no\nSigned-By: /usr/share/keyrings/keel-archive-keyring.gpg\n' \
+        >> "$S/keel.sources"
+    run bt_sources_verdict "$S/keel.sources"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"https://archive.keellinux.org trixie is enabled"* ]]
+}
+
 @test "build_leftovers_verdict passes on an image that kept none of them" {
     run bt_build_leftovers_verdict "$S/rootfs"
     [ "$status" -eq 0 ]
@@ -584,8 +593,8 @@ inithooks:
   Installed: ${1:-2.3.6+keel4}
   Candidate: ${2:-2.3.6+keel5}
   Version table:
-     ${2:-2.3.6+keel5} ${3:-1001}
-        ${3:-1001} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
+     ${2:-2.3.6+keel5} ${3:-990}
+        ${3:-990} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
  *** ${1:-2.3.6+keel4} 100
         100 /var/lib/dpkg/status
 EOF
@@ -595,7 +604,7 @@ EOF
     _policy
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 1001"* ]]
+    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 990"* ]]
     [[ "$output" == *"candidate 2.3.6+keel5"* ]]
 }
 
@@ -615,8 +624,8 @@ inithooks:
   Installed: 2.3.6+keel5
   Candidate: 2.3.6+keel5
   Version table:
- *** 2.3.6+keel5 1001
-       1001 https://archive.keellinux.org trixie/main amd64 Packages
+ *** 2.3.6+keel5 990
+       990 https://archive.keellinux.org trixie/main amd64 Packages
         100 /var/lib/dpkg/status
 EOF
     run bt_policy_verdict inithooks "$S/policy"
@@ -632,11 +641,62 @@ inithooks:
   Installed: 2.3.6+evil
   Candidate: 2.3.6+evil
   Version table:
- *** 2.3.6+evil 1001
-       1001 http://mirror.example.org trixie/main amd64 Packages
+ *** 2.3.6+evil 990
+       990 http://mirror.example.org trixie/main amd64 Packages
         100 /var/lib/dpkg/status
-     2.3.6+keel5 1001
-       1001 https://archive.keellinux.org trixie/main amd64 Packages
+     2.3.6+keel5 990
+       990 https://archive.keellinux.org trixie/main amd64 Packages
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not come from"* ]]
+}
+
+@test "policy_verdict passes when apt keeps an installed version newer than the archive's" {
+    # at 990 apt never goes backwards (tracker#23): an image built from a
+    # newer project package than the archive publishes keeps it
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+keel16
+  Candidate: 2.3.6+keel16
+  Version table:
+ *** 2.3.6+keel16 100
+        100 /var/lib/dpkg/status
+     2.3.6+keel5 990
+        990 https://archive.keellinux.org trixie/main amd64 Packages
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"keeps the installed inithooks 2.3.6+keel16, newer than 2.3.6+keel5"* ]]
+}
+
+@test "policy_verdict refuses an installed candidate older than the archive's" {
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+keel16
+  Candidate: 2.3.6+keel16
+  Version table:
+     2.3.6+keel20 990
+        990 https://archive.keellinux.org trixie/main amd64 Packages
+ *** 2.3.6+keel16 100
+        100 /var/lib/dpkg/status
+EOF
+    run bt_policy_verdict inithooks "$S/policy"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not come from"* ]]
+}
+
+@test "policy_verdict refuses a newer installed candidate another source also offers" {
+    cat > "$S/policy" <<EOF
+inithooks:
+  Installed: 2.3.6+keel99
+  Candidate: 2.3.6+keel99
+  Version table:
+ *** 2.3.6+keel99 500
+        500 http://mirror.example.org trixie/main amd64 Packages
+        100 /var/lib/dpkg/status
+     2.3.6+keel5 990
+        990 https://archive.keellinux.org trixie/main amd64 Packages
 EOF
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
@@ -654,7 +714,7 @@ EOF
     _policy 2.3.6+keel4 2.3.6+keel5 500
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"not a source of inithooks at priority 1001"* ]]
+    [[ "$output" == *"not a source of inithooks at priority 990"* ]]
 }
 
 @test "policy_verdict refuses a candidate that comes from somewhere else" {
@@ -663,10 +723,10 @@ inithooks:
   Installed: 2.3.6+keel4
   Candidate: 9.9.9
   Version table:
-     9.9.9 990
-        990 http://deb.debian.org/debian trixie/main amd64 Packages
-     2.3.6+keel5 1001
-        1001 https://archive.keellinux.org trixie/main amd64 Packages
+     9.9.9 500
+        500 http://deb.debian.org/debian trixie/main amd64 Packages
+     2.3.6+keel5 990
+        990 https://archive.keellinux.org trixie/main amd64 Packages
 EOF
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
