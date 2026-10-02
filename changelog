@@ -1,4 +1,4 @@
-turnkey-wordpress-19.0 (5) turnkey; urgency=medium
+turnkey-wordpress-19.0 (6) turnkey; urgency=medium
 
   * The overlay no longer ships /etc/apt/sources.list.d/keel.sources or
     /etc/apt/preferences.d/keel (the Keel origin at 1001). At 1001 apt
@@ -17,6 +17,10 @@ turnkey-wordpress-19.0 (5) turnkey; urgency=medium
     The boot test expects the archive at 990, reads only the stable stanza
     of keel.sources, and accepts an installed project package newer than the
     archive's that apt keeps, which is the no downgrade case.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 02 Oct 2026 17:00:00 +0000
+
+turnkey-wordpress-19.0 (5) turnkey; urgency=medium
 
   * bin/wordpress.py draws its password boxes on the terminal.
     firstboot.d/40wordpress reads the script's standard output for
