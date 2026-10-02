@@ -168,7 +168,7 @@ the image deliberately stale so the archive is always ahead. Both would be
 lies told to make a test pass.
 
 The second is also dangerous here, and measuring it is what settled the
-argument. `/etc/apt/preferences.d/keel` pins our origin at **1001**, the
+argument. `/etc/apt/preferences.d/keel` pinned our origin at **1001**, the
 priority that downgrades as well as upgrades. With the image one release ahead
 of the archive:
 
