@@ -1,13 +1,21 @@
 #!/bin/bash -e
-# Turn on the project's signed APT archive, which is the appliance's update
-# path, and prove that the key it will be verified with is in the image.
+# The project's signed APT archive, which is the appliance's update path:
+# its source enabled, its pin at 990, and proof that the key it will be
+# verified with is in the image.
+#
+# Keel-Linux/common#30 ships the source and the pin to every image
+# (overlays/turnkey.d/keel-apt); this script then checks them and changes
+# nothing. On a bootstrap from before that change it writes the same two
+# files. The recipe's overlay used to ship them, the pin at 1001, which made
+# apt downgrade every package newer than the archive's (tracker#23); at 990
+# the archive's build is still the candidate over any other archive, and a
+# newer installed version is never replaced.
 #
 # Runs last, after conf.d/zz-project-packages has removed the build time
-# file: source and emptied /var/lib/apt/lists. The order matters: with this
-# source enabled during the build, apt would resolve the project packages over
-# the network instead of from the copy of the archive inside the build tree,
-# which is the one thing zz-project-packages exists to prove, and the layer
-# would need a name to be reachable to build at all.
+# file: source and its pin and emptied /var/lib/apt/lists. The order matters:
+# with this source enabled during the build, apt would resolve the project
+# packages over the network instead of from the copy of the archive inside
+# the build tree, which is the one thing zz-project-packages exists to prove.
 #
 # It does not run "apt-get update". A conf script has no guarantee of a
 # network, an index fetched here would be stale in the image anyway, and
@@ -19,9 +27,11 @@
 # scratch tree.
 
 KEEL_SOURCES="${KEEL_SOURCES:-/etc/apt/sources.list.d/keel.sources}"
+KEEL_PREFS="${KEEL_PREFS:-/etc/apt/preferences.d/keel}"
 KEEL_KEYRING="${KEEL_KEYRING:-/usr/share/keyrings/keel-archive-keyring.gpg}"
 KEEL_ARCHIVE_URI="${KEEL_ARCHIVE_URI:-https://archive.keellinux.org}"
 KEEL_ARCHIVE_SUITE="${KEEL_ARCHIVE_SUITE:-trixie}"
+KEEL_PIN_PRIORITY=990
 KEEL_STAGING_LIST="${KEEL_STAGING_LIST:-/etc/apt/sources.list.d/keel-staging.list}"
 KEEL_STAGING_KEYRING="${KEEL_STAGING_KEYRING:-/etc/apt/keyrings/keel-staging-keyring.asc}"
 
@@ -30,12 +40,17 @@ fatal() {
     exit 1
 }
 
-field() {
-    # field NAME FILE: the value of a deb822 field, first occurrence
-    awk -v name="$1:" '$1 == name { $1 = ""; sub(/^ /, ""); print; exit }' "$2"
+# the stanza of the stable track: the first that names KEEL_ARCHIVE_SUITE,
+# or the first of the file when none does, so a wrong suite is reported
+stable_stanza() {
+    awk -v suite="$KEEL_ARCHIVE_SUITE" 'BEGIN { RS = "" } { if (first == "") first = $0 } $0 ~ "(^|\n)Suites:[ \t]*" suite "[ \t]*(\n|$)" { print; found = 1; exit } END { if (!found) print first }' "$KEEL_SOURCES"
 }
 
-[ -f "$KEEL_SOURCES" ] || fatal "$KEEL_SOURCES is not in the image"
+# field NAME: the value of a deb822 field of the stable stanza
+field() {
+    awk -v name="$1:" '$1 == name { $1 = ""; sub(/^ /, ""); print; exit }' <<< "$stanza"
+}
+
 [ -s "$KEEL_KEYRING" ] || fatal "$KEEL_KEYRING is missing or empty: the plan asks for keel-archive-keyring"
 
 # The build time source must be gone before this one is enabled, and so must
@@ -47,30 +62,57 @@ field() {
 [ ! -e "$KEEL_STAGING_KEYRING" ] \
     || fatal "$KEEL_STAGING_KEYRING is still in the image: the staging key must not reach an appliance"
 
-# Never the unsigned staging distribution: it exists only inside a build.
-suite=$(field Suites "$KEEL_SOURCES")
-[ "$suite" = "$KEEL_ARCHIVE_SUITE" ] \
-    || fatal "$KEEL_SOURCES names the suite '$suite', not '$KEEL_ARCHIVE_SUITE'"
-case "$suite" in
-    *staging*) fatal "$KEEL_SOURCES names an unsigned staging distribution" ;;
-esac
-
-uri=$(field URIs "$KEEL_SOURCES")
-[ "$uri" = "$KEEL_ARCHIVE_URI" ] \
-    || fatal "$KEEL_SOURCES names '$uri', not '$KEEL_ARCHIVE_URI'"
-
-signed_by=$(field Signed-By "$KEEL_SOURCES")
-[ "$signed_by" = "$KEEL_KEYRING" ] \
-    || fatal "$KEEL_SOURCES is signed by '$signed_by', not '$KEEL_KEYRING'"
-
 # A keyring with no key in it verifies nothing and apt says so only at run
 # time, so the key is counted here. gpg is in the image (core), and reading a
 # keyring needs no network and no agent.
 keys=$(gpg --show-keys --with-colons "$KEEL_KEYRING" 2>/dev/null | grep -c '^pub:' || true)
 [ "$keys" -ge 1 ] || fatal "$KEEL_KEYRING carries no public key"
 
-sed -i 's/^Enabled: no$/Enabled: yes/' "$KEEL_SOURCES"
-grep -qx 'Enabled: yes' "$KEEL_SOURCES" \
-    || fatal "$KEEL_SOURCES is still not enabled"
+# Written only when common did not ship them: the same text as common's.
+if [ ! -e "$KEEL_SOURCES" ]; then
+    mkdir -p "$(dirname "$KEEL_SOURCES")"
+    printf '%s\n' \
+        "# Keel Linux packages, from the Keel repository (handbook decision 0039)." \
+        "# trixie is the stable track; trixie-testing is off unless the operator" \
+        "# turns it on. Written by keel-wordpress's conf.d/zzz-keel-archive where" \
+        "# common did not ship it (Keel-Linux/common#30)." \
+        "Types: deb" "URIs: $KEEL_ARCHIVE_URI" "Suites: $KEEL_ARCHIVE_SUITE" \
+        "Components: main" "Enabled: yes" "Signed-By: $KEEL_KEYRING" "" \
+        "Types: deb" "URIs: $KEEL_ARCHIVE_URI" "Suites: $KEEL_ARCHIVE_SUITE-testing" \
+        "Components: main" "Enabled: no" "Signed-By: $KEEL_KEYRING" > "$KEEL_SOURCES"
+fi
+if [ ! -e "$KEEL_PREFS" ]; then
+    mkdir -p "$(dirname "$KEEL_PREFS")"
+    printf '%s\n' \
+        "# Keel Linux: prefer the project's packages over Debian's, never by" \
+        "# going backwards (tracker#23)." \
+        "Package: *" "Pin: release o=Keel Linux" "Pin-Priority: $KEEL_PIN_PRIORITY" > "$KEEL_PREFS"
+fi
 
-echo "[zzz-keel-archive] $uri $suite enabled, verified with $KEEL_KEYRING ($keys key)"
+# Never the unsigned staging distribution: it exists only inside a build.
+stanza=$(stable_stanza)
+suite=$(field Suites)
+[ "$suite" = "$KEEL_ARCHIVE_SUITE" ] \
+    || fatal "$KEEL_SOURCES names the suite '$suite', not '$KEEL_ARCHIVE_SUITE'"
+case "$suite" in
+    *staging*) fatal "$KEEL_SOURCES names an unsigned staging distribution" ;;
+esac
+
+uri=$(field URIs)
+[ "$uri" = "$KEEL_ARCHIVE_URI" ] \
+    || fatal "$KEEL_SOURCES names '$uri', not '$KEEL_ARCHIVE_URI'"
+
+signed_by=$(field Signed-By)
+[ "$signed_by" = "$KEEL_KEYRING" ] \
+    || fatal "$KEEL_SOURCES is signed by '$signed_by', not '$KEEL_KEYRING'"
+
+[ "$(field Enabled)" != no ] || fatal "$KEEL_SOURCES: $KEEL_ARCHIVE_SUITE is not enabled"
+
+# every priority the pin file gives, which must be the one 990
+priorities=$(awk '$1 == "Pin-Priority:" { print $2 }' "$KEEL_PREFS" | sort -u)
+[ "$priorities" = "$KEEL_PIN_PRIORITY" ] \
+    || fatal "$KEEL_PREFS pins at '$(tr '\n' ' ' <<< "$priorities")', not $KEEL_PIN_PRIORITY (tracker#23)"
+grep -qx 'Pin: release o=Keel Linux' "$KEEL_PREFS" \
+    || fatal "$KEEL_PREFS does not pin o=Keel Linux at $KEEL_PIN_PRIORITY"
+
+echo "[zzz-keel-archive] $uri $suite enabled, verified with $KEEL_KEYRING ($keys key), pinned at $KEEL_PIN_PRIORITY"

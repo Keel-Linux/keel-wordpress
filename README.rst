@@ -133,7 +133,11 @@ The appliance ships ``/etc/apt/sources.list.d/keel.sources`` **enabled** for
 the signed ``trixie`` distribution of ``https://archive.keellinux.org``, with
 ``Signed-By`` naming ``/usr/share/keyrings/keel-archive-keyring.gpg`` from the
 ``keel-archive-keyring`` package, and ``/etc/apt/preferences.d/keel`` pins that
-origin at 1001. So on a booted appliance::
+origin at 990. Both come from common (``overlays/turnkey.d/keel-apt``,
+Keel-Linux/common#30); on a bootstrap from before that, ``conf.d/zzz-keel-archive``
+writes the same two files. 990 makes our build of a package the candidate over
+any other archive and never replaces a newer installed version; the 1001 this
+recipe used to ship downgraded (tracker#23). So on a booted appliance::
 
     apt-get update      # reads our archive and verifies its signature
     apt-get upgrade     # takes newer Debian and newer project packages
@@ -149,7 +153,8 @@ The boot test proves that path rather than proving that a newer version
 happens to exist on the day it runs. It asserts that ``apt-get update``
 verifies our archive's signature; that ``apt-cache policy`` shows a project
 package the image carries with our archive as the source of its candidate at
-that pin priority; that ``keel-transition``, which the image does not carry,
+that pin priority, or the installed version kept because it is newer than
+our archive's, which is what 990 promises; that ``keel-transition``, which the image does not carry,
 comes down from our archive against the digest the signed index holds; and
 that a project package the image does carry is downloaded again and put
 through dpkg. apt refuses an archive it cannot verify before it asks for a

@@ -59,9 +59,10 @@ etc/apt/keyrings/keel-staging-keyring.asc"
 # A project package the image already carries, to show that apt would take its
 # next version from our archive rather than from anywhere else: the candidate
 # has to come from our archive, at the priority the appliance's own pin file
-# sets.
+# sets, unless the image carries a newer one, which 990 never replaces
+# (tracker#23).
 BT_POLICY_PACKAGE="inithooks"
-BT_ARCHIVE_PIN=1001
+BT_ARCHIVE_PIN=990
 # Where this library and the awk programs beside it live.
 BT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # And the package path itself, in two steps, neither of which needs a version
@@ -550,7 +551,11 @@ bt_build_leftovers_verdict() {
 bt_sources_verdict() {
     # bt_sources_verdict FILE: the appliance's own APT source, as it ships:
     # enabled, the signed distribution, our keyring, and never a staging one.
-    local sources=$1 field value
+    # Only the stanza of the stable track is read: common's file carries the
+    # testing track beside it, disabled. With no such stanza the first one is
+    # read, so the suite it names is what the refusal reports.
+    local sources=$1 field value stanza
+    stanza=$(awk -v suite="$BT_ARCHIVE_SUITE" 'BEGIN { RS = "" } { if (first == "") first = $0 } $0 ~ "(^|\n)Suites:[ \t]*" suite "[ \t]*(\n|$)" { print; found = 1; exit } END { if (!found) print first }' "$sources")
     while read -r field value; do
         case "$field" in
             Enabled:) [ "$value" = yes ] || {
@@ -562,7 +567,7 @@ bt_sources_verdict() {
             Signed-By:) [ "$value" = "$BT_ARCHIVE_KEYRING" ] || {
                 echo "boot-test: $sources is signed by '$value', not $BT_ARCHIVE_KEYRING" >&2; return 1; } ;;
         esac
-    done < "$sources"
+    done <<< "$stanza"
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
 }
 
@@ -619,6 +624,15 @@ bt_apt_update_verdict() {
     echo "boot-test: apt-get update read $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE and verified its signature"
 }
 
+bt_policy_block() {
+    # bt_policy_block FILE: the version table of "apt-cache policy" in FILE as
+    # "VERSION PRIORITY SOURCE", one line per source of each version
+    # the $ are awk's, not the shell's
+    # shellcheck disable=SC2016
+    local prog='{ if ($1 == "***") { $1 = ""; $0 = $0 } } $1 == "Version" && $2 == "table:" { table = 1; next } !table { next } NF == 2 && $2 ~ /^-?[0-9]+$/ && $1 !~ /^-?[0-9]+$/ { cur = $1; next } $1 ~ /^-?[0-9]+$/ { print cur, $1, $2 }'
+    awk "$prog" "$1"
+}
+
 bt_policy_verdict() {
     # bt_policy_verdict PACKAGE FILE: FILE is "apt-cache policy PACKAGE" from
     # inside the appliance. Our archive has to be a source apt knows, at the
@@ -638,10 +652,19 @@ bt_policy_verdict() {
         return 1
     fi
     # the candidate's own block of the version table has to list our archive
-    # at our pin (candidate-source.awk says why)
+    # at our pin (candidate-source.awk says why), or be the installed version
+    # alone, newer than what our archive offers: below 1000 apt never goes
+    # backwards, which is the point of 990 (tracker#23)
     if ! awk -v version="$candidate" -v pin="$BT_ARCHIVE_PIN" \
         -v uri="$BT_ARCHIVE_URI" -f "$BT_LIB_DIR/candidate-source.awk" \
         "$file"; then
+        local offered sources
+        offered=$(bt_policy_block "$file" | awk -v pin="$BT_ARCHIVE_PIN" -v uri="$BT_ARCHIVE_URI" '$2 == pin && $3 == uri { print $1; exit }')
+        sources=$(bt_policy_block "$file" | awk -v version="$candidate" '$1 == version { print $3 }')
+        if [ "$sources" = /var/lib/dpkg/status ] && dpkg --compare-versions "$candidate" gt "$offered"; then
+            echo "boot-test: apt keeps the installed $package $candidate, newer than $offered from $BT_ARCHIVE_URI at priority $BT_ARCHIVE_PIN: never downgraded"
+            return 0
+        fi
         echo "boot-test: the candidate $package $candidate does not come from" \
             "$BT_ARCHIVE_URI at priority $BT_ARCHIVE_PIN" >&2
         return 1
