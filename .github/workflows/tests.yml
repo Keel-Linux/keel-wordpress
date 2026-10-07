@@ -22,7 +22,7 @@ jobs:
     # produces the check "tests / coverage", the required status on master. The
     # job id is part of that name, so renaming it silently detaches the
     # protection rule.
-    uses: keel-linux/.github/.github/workflows/test-shell.yml@main
+    uses: keel-linux/.github/.github/workflows/test-shell.yml@ci/node24-actions
     with:
       threshold: 97
   appliance:
@@ -45,7 +45,7 @@ jobs:
     # published, so it is not used here. This job produces the check
     # "appliance / boot-published-layer".
     if: vars.KEEL_LXC_RUNNER == 'true'
-    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
+    uses: keel-linux/.github/.github/workflows/test-appliance.yml@ci/node24-actions
     with:
       appliance: wordpress
       # The delta is built on the mariadb layer; the workflow checks this
@@ -68,7 +68,7 @@ jobs:
     # make-release-deb.py turns into the release package. So that is the file a
     # change which ships has to bump. This job produces the check
     # "package / changelog".
-    uses: keel-linux/.github/.github/workflows/require-changelog.yml@main
+    uses: keel-linux/.github/.github/workflows/require-changelog.yml@ci/node24-actions
     with:
       changelog: changelog
       # keel/ is the example instance description, which the layer does not
