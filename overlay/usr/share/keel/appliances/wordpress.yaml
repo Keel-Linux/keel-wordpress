@@ -1,0 +1,32 @@
+manifest_version: 1
+kind: appliance
+name: wordpress
+title: Keel WordPress
+summary: WordPress on nginx, PHP-FPM and MariaDB (the LNMP stack), alone or as a replicated pair (0047, 0059)
+base: lnmp
+# The processes, the checks and the overlays are lnmp's, Web's and Core's,
+# inherited with their states: nginx, PHP-FPM and MariaDB are already there,
+# and this layer adds none. The database account and its password are lnmp's
+# too (the option db_user and the secret db_password, whose names are unique
+# across the chain): an instance description of this appliance sets db_user
+# to wordpress, the account that the layer ships with no password and that
+# firstboot.d/35mysqlpass gives the declared one. The administrator's
+# password is secrets.app_password, a name of the spec itself.
+options:
+  - name: admin_user
+    type: string
+    default: admin
+    # the rule of wordpress_is_login in lib/wordpress.sh
+    pattern: '^[A-Za-z0-9._@+-]+$'
+  - name: site_title
+    type: string
+    default: WordPress
+  - name: db_name
+    type: string
+    default: wordpress
+    # a name that needs no quoting in a statement, wordpress_is_ident
+    pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+  - name: db_prefix
+    type: string
+    default: wp_
+    pattern: '^[A-Za-z_][A-Za-z0-9_]*$'

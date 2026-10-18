@@ -1,6 +1,9 @@
 # Instance description of a WordPress appliance, IPv6 first (docs/spec.md in
-# the keel repository). Copy to /etc/keel/instance.yaml and create the three
-# secret files (mode 0600, owned by root) before the first boot:
+# the keel repository; handbook decisions 0047 and 0059): WordPress on nginx,
+# PHP-FPM and MariaDB, in a simple installation. Overlays are every overlay of
+# the chain: Core's five and Web's three. instance.pair.example.yaml is the
+# primary of a replicated pair. Copy to /etc/keel/instance.yaml and create the
+# three secret files (mode 0600, owned by root) before the first boot:
 #
 #   /etc/keel/secrets/root_password
 #   /etc/keel/secrets/db_password     the WordPress database account
@@ -41,10 +44,24 @@ tls:
     domains:
       - wordpress.example.org
 
+appliance:
+  name: wordpress
+installation:
+  mode: simple
+overlays:
+  installer: enabled
+  wireguard: disabled
+  etcd: disabled
+  crowdsec: disabled
+  vip: disabled
+  nginx: enabled
+  coraza: disabled
+  anubis: disabled
+
 secrets:
   root_password:
     file: /etc/keel/secrets/root_password
-  # Reaches the database. It renders to DB_PASS, which the parent layer's
+  # Reaches the database. It renders to DB_PASS, which the lnmp layer's
   # firstboot.d/35mysqlpass gives to the account named in app.options.db_user,
   # and which firstboot.d/40wordpress then writes into wp-config.php.
   db_password:
@@ -64,8 +81,9 @@ app:
     # The WordPress account, and the title the installer would have asked for.
     admin_user: admin
     site_title: WordPress
-    # The database account. The same field the parent layer reads to decide
+    # The database account. The same field the lnmp layer reads to decide
     # whose password DB_PASS is, which is why one declaration serves both.
+    # lnmp's own default is admin: this appliance must name wordpress.
     db_user: wordpress
     db_name: wordpress
     db_prefix: wp_

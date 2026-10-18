@@ -1,21 +1,11 @@
 #include <turnkey/base>
 
-/* The database, which the parent layer already carries: fab-plan-resolve
-   keeps a package the parent installed at the parent's version, so naming
-   them here costs nothing and makes the recipe buildable on its own. */
-#include <turnkey/mysql>
-mariadb-client
-
-/* Apache and PHP, which is what this layer adds. turnkey/lamp is not
-   included: it brings Adminer, which this appliance does not use (Makefile). */
-apache2
-libapache2-mod-php
-libapache2-mod-security2
-libapache2-mod-evasive
+/* The parent layer, lnmp, carries nginx (through Keel Web), PHP-FPM 8.4 with
+   its MariaDB module, the MariaDB server and client, and the project
+   packages (inithooks, confconsole, keel). fab-plan-resolve keeps a package
+   the parent installed at the parent's version, so none of them is named
+   here. Nothing of Apache is: Keel retired it (handbook decision 0059). */
 php-cli
-php-mysql
-webmin-apache
-webmin-phpini
 
 /* WordPress: what it needs, and what it recommends and is worth having */
 php-gd              /* image resizing, the media library */
@@ -31,12 +21,7 @@ unzip               /* most plugins and themes are zip archives */
 curl
 w3m                 /* the text browser the update tooling uses */
 
-/* project packages, resolved from the build host's staging repository.
-   keel-archive-keyring is new here: it carries the key that our own APT
-   archive is signed with, which is what lets a booted appliance run
-   "apt-get update" against archive.keellinux.org and verify what it gets
-   (conf.d/zzz-keel-archive, README.rst). */
+/* project packages, from the Keel archive (archive.keellinux.org) */
 inithooks
 confconsole
 keel
-keel-archive-keyring

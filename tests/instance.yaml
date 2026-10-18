@@ -31,10 +31,24 @@ tls:
   acme:
     enabled: false
 
+appliance:
+  name: wordpress
+installation:
+  mode: simple
+overlays:
+  installer: enabled
+  wireguard: disabled
+  etcd: disabled
+  crowdsec: disabled
+  vip: disabled
+  nginx: enabled
+  coraza: disabled
+  anubis: disabled
+
 secrets:
   root_password:
     file: /etc/keel/secrets/root_password
-  # Renders to DB_PASS: the parent layer's 35mysqlpass gives it to the
+  # Renders to DB_PASS: the lnmp layer's 35mysqlpass gives it to the
   # 'wordpress' database account and 40wordpress writes it into wp-config.php.
   db_password:
     file: /etc/keel/secrets/db_password

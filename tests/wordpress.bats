@@ -315,3 +315,74 @@ setup() {
     run wordpress_install_args "https://x" "T" admin ""
     [ "$status" -ne 0 ]
 }
+
+# --- the role of the node, the schema and the permalinks ----------------------
+
+@test "spec_role reads database.server.role from the spec" {
+    printf 'database:\n  server:\n    role: replica\n' > "$BATS_TEST_TMPDIR/spec.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/spec.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "replica" ]
+}
+
+@test "spec_role is empty for a spec with no database section" {
+    printf 'instance:\n  hostname: wordpress\n' > "$BATS_TEST_TMPDIR/spec.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/spec.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "spec_role is empty for a spec that is missing or is not YAML" {
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/none.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    printf 'a: [unclosed\n' > "$BATS_TEST_TMPDIR/bad.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/bad.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "is_replica is true for the role replica and for a server that is read only" {
+    run wordpress_is_replica replica 0
+    [ "$status" -eq 0 ]
+    run wordpress_is_replica "" 1
+    [ "$status" -eq 0 ]
+    run wordpress_is_replica primary ON
+    [ "$status" -eq 0 ]
+}
+
+@test "is_replica is false for a primary, a standalone server and a writable server" {
+    run wordpress_is_replica primary 0
+    [ "$status" -ne 0 ]
+    run wordpress_is_replica "" 0
+    [ "$status" -ne 0 ]
+    run wordpress_is_replica "" OFF
+    [ "$status" -ne 0 ]
+}
+
+@test "create_database_sql makes the schema with the character set of WordPress" {
+    run wordpress_create_database_sql wordpress
+    [ "$status" -eq 0 ]
+    [ "$output" = 'CREATE DATABASE IF NOT EXISTS `wordpress` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' ]
+}
+
+@test "create_database_sql refuses a name that would need quoting" {
+    run wordpress_create_database_sql 'word press'
+    [ "$status" -ne 0 ]
+    run wordpress_create_database_sql 'x`; DROP DATABASE mysql; --'
+    [ "$status" -ne 0 ]
+    run wordpress_create_database_sql ""
+    [ "$status" -ne 0 ]
+}
+
+@test "missing_values does not ask a replica for the administrator password" {
+    run wordpress_missing_values "" "db" replica
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    run wordpress_missing_values "" "" replica
+    [ "$output" = "DB_PASS" ]
+}
+
+@test "the permalink structure is the post name" {
+    [ "$WORDPRESS_PERMALINKS" = "/%postname%/" ]
+}

@@ -473,6 +473,39 @@ EOF
     [[ "$output" == *"answered 302 with the login cookie"* ]]
 }
 
+# --- nginx and the hardening of the site ---------------------------------------
+
+@test "status_verdict passes when the route answered what it should" {
+    run bt_status_verdict "/keel-check/" 200 200
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/keel-check/ answered 200"* ]]
+}
+
+@test "status_verdict refuses another status and names both" {
+    run bt_status_verdict "/wp-config.php" 403 200
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/wp-config.php answered 200, not 403"* ]]
+    run bt_status_verdict "/hello-world/" 200 ""
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"answered , not 200"* ]]
+}
+
+@test "no_apache_verdict passes on a tree with no Apache" {
+    mkdir -p "$S/rootfs/usr/sbin" "$S/rootfs/etc"
+    run bt_no_apache_verdict "$S/rootfs"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no Apache in the image"* ]]
+}
+
+@test "no_apache_verdict names every part of Apache the image kept" {
+    install -D /dev/null "$S/rootfs/usr/sbin/apache2"
+    install -D /dev/null "$S/rootfs/etc/apache2/apache2.conf"
+    run bt_no_apache_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/usr/sbin/apache2"* ]]
+    [[ "$output" == *"/etc/apache2/apache2.conf"* ]]
+}
+
 # --- the update path --------------------------------------------------------
 
 _sources() {
@@ -482,7 +515,7 @@ URIs: ${1:-https://archive.keellinux.org}
 Suites: ${2:-trixie}
 Components: main
 Enabled: ${3:-yes}
-Signed-By: ${4:-/usr/share/keyrings/keel-archive-keyring.gpg}
+Signed-By: ${4:-/usr/share/keyrings/keel-archive-keyring.asc}
 EOF
 }
 
@@ -491,6 +524,21 @@ EOF
     run bt_sources_verdict "$S/keel.sources"
     [ "$status" -eq 0 ]
     [[ "$output" == *"is enabled and verified with"* ]]
+}
+
+@test "sources_verdict passes on the two sources that Core ships, stable and testing" {
+    _sources
+    printf '\n' >> "$S/keel.sources"
+    cat >> "$S/keel.sources" <<EOF
+Types: deb
+URIs: https://archive.keellinux.org
+Suites: trixie-testing
+Components: main
+Enabled: yes
+Signed-By: /usr/share/keyrings/keel-archive-keyring.asc
+EOF
+    run bt_sources_verdict "$S/keel.sources"
+    [ "$status" -eq 0 ]
 }
 
 @test "build_leftovers_verdict passes on an image that kept none of them" {
@@ -538,6 +586,7 @@ EOF
     run bt_sources_verdict "$S/keel.sources"
     [ "$status" -eq 1 ]
     [[ "$output" == *"names the suite 'trixie-staging'"* ]]
+    [[ "$output" == *"not one of trixie trixie-testing"* ]]
     _sources https://apt.example.org trixie yes
     run bt_sources_verdict "$S/keel.sources"
     [ "$status" -eq 1 ]
@@ -584,8 +633,8 @@ inithooks:
   Installed: ${1:-2.3.6+keel4}
   Candidate: ${2:-2.3.6+keel5}
   Version table:
-     ${2:-2.3.6+keel5} ${3:-1001}
-        ${3:-1001} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
+     ${2:-2.3.6+keel5} ${3:-990}
+        ${3:-990} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
  *** ${1:-2.3.6+keel4} 100
         100 /var/lib/dpkg/status
 EOF
@@ -595,7 +644,7 @@ EOF
     _policy
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 1001"* ]]
+    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 990"* ]]
     [[ "$output" == *"candidate 2.3.6+keel5"* ]]
 }
 
@@ -615,8 +664,8 @@ inithooks:
   Installed: 2.3.6+keel5
   Candidate: 2.3.6+keel5
   Version table:
- *** 2.3.6+keel5 1001
-       1001 https://archive.keellinux.org trixie/main amd64 Packages
+ *** 2.3.6+keel5 990
+       990 https://archive.keellinux.org trixie/main amd64 Packages
         100 /var/lib/dpkg/status
 EOF
     run bt_policy_verdict inithooks "$S/policy"
@@ -632,11 +681,11 @@ inithooks:
   Installed: 2.3.6+evil
   Candidate: 2.3.6+evil
   Version table:
- *** 2.3.6+evil 1001
-       1001 http://mirror.example.org trixie/main amd64 Packages
+ *** 2.3.6+evil 990
+       990 http://mirror.example.org trixie/main amd64 Packages
         100 /var/lib/dpkg/status
-     2.3.6+keel5 1001
-       1001 https://archive.keellinux.org trixie/main amd64 Packages
+     2.3.6+keel5 990
+       990 https://archive.keellinux.org trixie/main amd64 Packages
 EOF
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
@@ -654,7 +703,7 @@ EOF
     _policy 2.3.6+keel4 2.3.6+keel5 500
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"not a source of inithooks at priority 1001"* ]]
+    [[ "$output" == *"not a source of inithooks at priority 990"* ]]
 }
 
 @test "policy_verdict refuses a candidate that comes from somewhere else" {
@@ -665,8 +714,8 @@ inithooks:
   Version table:
      9.9.9 990
         990 http://deb.debian.org/debian trixie/main amd64 Packages
-     2.3.6+keel5 1001
-        1001 https://archive.keellinux.org trixie/main amd64 Packages
+     2.3.6+keel5 990
+        990 https://archive.keellinux.org trixie/main amd64 Packages
 EOF
     run bt_policy_verdict inithooks "$S/policy"
     [ "$status" -eq 1 ]

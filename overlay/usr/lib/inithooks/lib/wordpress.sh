@@ -29,7 +29,12 @@ WORDPRESS_ADMIN_EMAIL="${WORDPRESS_ADMIN_EMAIL:-admin@example.com}"
 # wp-config.php derives the real one from the Host header.
 WORDPRESS_FALLBACK_URL="${WORDPRESS_FALLBACK_URL:-http://localhost}"
 WORDPRESS_DB_SERVICE="${WORDPRESS_DB_SERVICE:-mariadb}"
-WORDPRESS_WEB_SERVICE="${WORDPRESS_WEB_SERVICE:-apache2}"
+WORDPRESS_WEB_SERVICE="${WORDPRESS_WEB_SERVICE:-nginx}"
+# The instance description, which says whether this node is a replica
+# (database.server.role), and the permalink structure of a new site. nginx
+# serves a pretty permalink with try_files, so no .htaccess is needed.
+WORDPRESS_SPEC="${WORDPRESS_SPEC:-/etc/keel/instance.yaml}"
+WORDPRESS_PERMALINKS="${WORDPRESS_PERMALINKS:-/%postname%/}"
 WORDPRESS_WAIT_TRIES="${WORDPRESS_WAIT_TRIES:-30}"
 # The eight keys wp-config.php carries. WordPress asks its own API for them;
 # a first boot must not need the internet, so they are generated here.
@@ -139,13 +144,50 @@ wordpress_site_url() {
     printf '%s\n' "$value"
 }
 
-# wordpress_missing_values APP_PASS DB_PASS: the names of the values that
-# need a prompt, one per line. Empty output means the instance description
-# carried everything, which is the headless case the boot test proves.
+# wordpress_missing_values APP_PASS DB_PASS [ROLE]: the names of the values
+# that need a prompt, one per line. Empty output means the instance
+# description carried everything, which is the headless case the boot test
+# proves. A replica installs nothing, so it needs no administrator password:
+# the administrator is a row that comes with the copy of the primary.
 wordpress_missing_values() {
-    [[ -n "${1-}" ]] || echo APP_PASS
+    [[ -n "${1-}" || "${3-}" == replica ]] || echo APP_PASS
     [[ -n "${2-}" ]] || echo DB_PASS
     return 0
+}
+
+# wordpress_spec_role [SPEC]: database.server.role of the instance
+# description, or nothing when the file is missing, is not YAML or declares
+# no role. Never fails: a machine with no pair declares no role.
+wordpress_spec_role() {
+    local spec=${1:-$WORDPRESS_SPEC}
+    [[ -r "$spec" ]] || return 0
+    python3 - "$spec" <<'PY' 2>/dev/null || true
+import sys, yaml
+spec = yaml.safe_load(open(sys.argv[1])) or {}
+print(((spec.get("database") or {}).get("server") or {}).get("role") or "")
+PY
+}
+
+# wordpress_is_replica ROLE READ_ONLY: true when this node must write
+# nothing to the database. The role is what the description declares and
+# READ_ONLY is @@global.read_only of the server, so a node that is already a
+# replica is one even when the description is gone.
+wordpress_is_replica() {
+    local role=${1-} read_only=${2-}
+    [[ "$role" == replica ]] && return 0
+    case "${read_only^^}" in
+        1|ON) return 0 ;;
+    esac
+    return 1
+}
+
+# wordpress_create_database_sql NAME: the statement that makes the schema.
+# It is made at the first boot of a primary or a standalone node and not in
+# the image: keel counts a schema that is not the server's own as a local
+# database, and refuses to replace it with the copy of the primary.
+wordpress_create_database_sql() {
+    wordpress_is_ident "${1-}" || return 1
+    printf 'CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n' "$1"
 }
 
 # wordpress_masked PASS: what a log may show of a password

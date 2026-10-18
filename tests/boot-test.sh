@@ -8,7 +8,10 @@
 # What it proves, in order, and none of it by reading a file the build wrote:
 #
 #   1. the site answers 200 over IPv6 on port 80 and on port 443
-#   2. the page is a WordPress site and not the WordPress installer
+#   2. the page is a WordPress site and not the WordPress installer, nginx
+#      serves it (no Apache in the image), the check page of lnmp answers, a
+#      pretty permalink and the REST API work, and wp-config.php, PHP in the
+#      uploads and the PHP files of wp-includes and hidden files are refused
 #   3. wp-config.php names the local database, the appliance's own account and
 #      the password the instance description declared, and none of upstream's
 #      build time values
@@ -134,9 +137,9 @@ bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" "the first boot of $BT_NAME to finish" 
     first_boot_done
 log "first boot finished; ssh root@$addr"
 
-# 6. The site answers on both ports. WordPress is up as soon as Apache is, but
-#    40wordpress restarts Apache at the end of the first boot, so the page is
-#    polled rather than fetched once.
+# 6. The site answers on both ports. nginx and PHP-FPM are up before the first
+#    boot ends, but 40wordpress writes wp-config.php and installs the site
+#    during it, so the page is polled rather than fetched once.
 page=$container_dir/index.html
 code=""
 site_answers() {
@@ -152,6 +155,22 @@ bt_http_verdict 80 "$code80" "$(bt_page_title "$plain")"
 
 # 7. It is a WordPress site, and it is not the installer.
 bt_installer_verdict "$page"
+
+# 7b. nginx, and what it does with the routes of the site: the check page of
+#     the lnmp layer is still there, a pretty permalink reaches WordPress
+#     through try_files, the REST API answers, and the three refusals of the
+#     hardening hold. Each is a request and its status.
+bt_no_apache_verdict "$BT_ROOTFS"
+route_code() {
+    curl -6 -k -sS -o /dev/null -w '%{http_code}' "https://[$addr]$1" 2>/dev/null || true
+}
+bt_status_verdict "/keel-check/" 200 "$(route_code /keel-check/)"
+bt_status_verdict "/hello-world/ (pretty permalink)" 200 "$(route_code /hello-world/)"
+bt_status_verdict "/wp-json/ (REST API)" 200 "$(route_code /wp-json/)"
+bt_status_verdict "/wp-config.php" 403 "$(route_code /wp-config.php)"
+bt_status_verdict "/wp-content/uploads/x.php" 403 "$(route_code /wp-content/uploads/x.php)"
+bt_status_verdict "/wp-includes/version.php" 403 "$(route_code /wp-includes/version.php)"
+bt_status_verdict "/.git/config" 403 "$(route_code /.git/config)"
 
 # 8. wp-config.php: what it names, and that it carries the declared password.
 #    The rootfs copy is read, because what the appliance runs on is what has to
