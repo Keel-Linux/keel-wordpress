@@ -47,7 +47,12 @@ BT_ARCHIVE_SUITE="trixie"
 # Core ships two sources of the archive, the stable suite and the testing
 # one, both signed by the keyring of the keel-archive-keyring package.
 BT_ARCHIVE_SUITES="trixie trixie-testing"
-BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.asc"
+# The keyrings that sign the sources of the archive. The package of the keys
+# puts the keyring of the main key in two formats (.gpg in the Core of
+# 2026-10-18, .asc in the one before), and the testing suite is signed by the
+# testing key (decision 0055).
+BT_ARCHIVE_KEYRINGS="/usr/share/keyrings/keel-archive-keyring.gpg /usr/share/keyrings/keel-archive-keyring.asc /usr/share/keyrings/keel-testing-keyring.gpg"
+BT_ARCHIVE_KEYRING="${BT_ARCHIVE_KEYRINGS%% *}"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 # What the build used to reach the project's own packages and what must not be
 # in the finished image: the copy of the staging archive, the source entry that
@@ -593,8 +598,10 @@ bt_sources_verdict() {
                 *" $value "*) ;;
                 *) echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1 ;;
                 esac ;;
-            Signed-By:) [ "$value" = "$BT_ARCHIVE_KEYRING" ] || {
-                echo "boot-test: $sources is signed by '$value', not $BT_ARCHIVE_KEYRING" >&2; return 1; } ;;
+            Signed-By:) case " $BT_ARCHIVE_KEYRINGS " in
+                *" $value "*) ;;
+                *) echo "boot-test: $sources is signed by '$value', not one of $BT_ARCHIVE_KEYRINGS" >&2; return 1 ;;
+                esac ;;
         esac
     done < "$sources"
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
