@@ -1,8 +1,10 @@
-keel-wordpress-19.0 (7) keel; urgency=medium
+keel-wordpress-19.0 (8) keel; urgency=medium
 
   * A media upload of up to 64 MB works behind Anubis and Coraza
     (Keel-Linux/keel-web#15). /etc/nginx/keel-front.d/60-keel-wordpress.conf
-    sets the body limit of the front site, which keel-web 0.3.1 includes.
+    sets the body limit of the front site, which keel-web 0.3.2 includes
+    (0.3.1 set a limit of its own in the front, which Nginx refuses to have
+    twice). A testing build 19.0-7 carried that defect and is not published.
     The memory of a worker stays bounded with keel-overlay-coraza 0.1.4: an
     upload of 32 MiB costs about 10 MiB. The build fails without the file.
   * The exclusion of the REST API for Coraza reads only the content fields
