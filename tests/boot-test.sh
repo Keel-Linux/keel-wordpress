@@ -20,15 +20,11 @@
 #   5. the administrator logs in over HTTP with the declared app_password and
 #      is given a session cookie, a wrong password is refused, and the
 #      dashboard comes back for the session
-#   6. the image carries none of the build time files the recipe installed the
-#      project's own packages from: the copy of the staging archive, its
-#      source entry and the keyring that verified it
-#   7. apt-get update against archive.keellinux.org verifies its signature,
-#      apt takes a project package from that archive at the appliance's own pin
-#      priority, a project package the image has not got is fetched from it
-#      against the digest of the signed index, and a project package the image
-#      has is downloaded again and put through dpkg
-#   8. keel diff reports no drift between the spec and the machine
+#   6. the image carries none of the build time files of the recipe, and the
+#      apt sources of the archive are enabled and signed (the files only: the
+#      runner of the image gate has no route to the archive, and the update
+#      path is the business of the boot test of Core)
+#   7. keel diff reports no drift between the spec and the machine
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
 # verify; runnable by hand as root on any host with LXC, see tests/README.md.
@@ -239,75 +235,14 @@ bad_code=$(curl -6 -k -sS -o /dev/null -w '%{http_code}' \
 bt_refused_login_verdict "$bad_code" "$badjar"
 rm -f "$passfile" "$container_dir/bad_password"
 
-# 11. The update path: the appliance's own APT source, then apt itself. This is
-#     the half of the deliverable that is not about WordPress, and it is proved
-#     on the booted machine because a source file that says the right thing and
-#     an apt that cannot verify the archive look identical from the build.
+# 11. The files of the update path, and nothing of the build. The apt files are
+#     Core's: the appliance's own APT source is enabled and signed, and none of
+#     the files the build used is in the image. The proofs that ask the archive
+#     over the network (the update, the pin, a download, a reinstall) are
+#     not here: the runner of the image gate has no route to the archive, and
+#     the update path is the business of the boot test of Core.
 bt_build_leftovers_verdict "$BT_ROOTFS"
 bt_sources_verdict "$BT_ROOTFS/$BT_SOURCES"
-if [ "$BT_SKIP_UPDATE" -eq 1 ]; then
-    log "--skip-update: the two APT proofs were not run"
-else
-    resolved=$(inside "getent ahosts $BT_ARCHIVE_HOST" 2>/dev/null || true)
-    if ! bt_archive_reachable "$resolved"; then
-        log "SKIPPED: the four archive proofs. $BT_ARCHIVE_HOST resolves to a"
-        log "         loopback address inside this container, so apt would"
-        log "         reach the container itself. That is the runner's"
-        log "         network, not the appliance: tracker#5."
-        printf '%s\n' "$resolved" | head -2
-        BT_SKIP_UPDATE=1
-    fi
-fi
-if [ "$BT_SKIP_UPDATE" -eq 0 ]; then
-    update_out=$container_dir/apt-update.txt
-    set +e
-    inside 'apt-get update' > "$update_out" 2>&1
-    update_code=$?
-    set -e
-    tail -n 6 "$update_out"
-    bt_apt_update_verdict "$update_code" "$update_out"
-
-    # Where apt would take a project package from. Not whether a newer one
-    # exists: that depends on what the archive happens to hold tonight, and a
-    # test that needs it either invents a release or wants the image kept
-    # stale. What matters to an operator is that this machine's project
-    # packages come from our archive, at the priority the appliance sets.
-    policy_out=$container_dir/apt-policy.txt
-    inside "apt-cache policy $BT_POLICY_PACKAGE" > "$policy_out" 2>&1
-    cat "$policy_out"
-    bt_policy_verdict "$BT_POLICY_PACKAGE" "$policy_out"
-
-    # A project package the image has not got, fetched from our archive. Both
-    # this and the next step stay inside our archive: the CI runner has no
-    # IPv4 route out, so a step that needed a package from Debian would be
-    # testing the runner's network and not the appliance.
-    before=$(inside "dpkg-query -W -f '\${Status}' $BT_FETCH_PACKAGE 2>/dev/null" || true)
-    bt_absent_verdict "$BT_FETCH_PACKAGE" "$before"
-    fetch_out=$container_dir/apt-download.txt
-    set +e
-    inside "cd /run && rm -f ${BT_FETCH_PACKAGE}_*.deb && apt-get download $BT_FETCH_PACKAGE" \
-        > "$fetch_out" 2>&1
-    fetch_code=$?
-    set -e
-    tail -n 4 "$fetch_out"
-    # measured in the container, because apt wrote into a tmpfs
-    fetched_size=$(inside "stat -c %s /run/${BT_FETCH_PACKAGE}_*.deb 2>/dev/null | head -1" || true)
-    bt_download_verdict "$BT_FETCH_PACKAGE" "$fetch_code" "${fetched_size:-0}" "$fetch_out"
-    inside "rm -f /run/${BT_FETCH_PACKAGE}_*.deb" || true
-
-    # And the installation half: the same archive, downloaded again and put
-    # through dpkg.
-    install_out=$container_dir/apt-install.txt
-    set +e
-    inside "DEBIAN_FRONTEND=noninteractive apt-get -y install --reinstall $BT_INSTALL_PACKAGE" \
-        > "$install_out" 2>&1
-    install_code=$?
-    set -e
-    tail -n 6 "$install_out"
-    version=$(inside "dpkg-query -W -f '\${Version}' $BT_INSTALL_PACKAGE" || true)
-    status=$(inside "dpkg-query -W -f '\${Status}' $BT_INSTALL_PACKAGE" || true)
-    bt_install_verdict "$BT_INSTALL_PACKAGE" "$install_code" "$version" "$status" "$install_out"
-fi
 
 # 12. No drift between the declared spec and the booted root.
 set +e
