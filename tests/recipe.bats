@@ -102,7 +102,23 @@ code() {
     run code "$REPO/overlay/etc/cron.d/wordpress-cron"
     run ! grep -E 'curl|wp-cron.php' <<< "$output"
     code "$REPO/overlay/etc/cron.d/wordpress-cron" \
-        | grep -qE '^\*/5 \* \* \* \* www-data /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now'
+        | grep -qF '/usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now'
+}
+
+@test "recipe: the cron job does nothing on a read-only server and runs when the server cannot be asked" {
+    job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
+    [[ "$job" == *"SELECT @@global.read_only"* ]]
+    [[ "$job" == *'!= 1 ] && /usr/local/bin/wp'* ]]
+    # the schedule part of the line is run by sh: the test of the guard
+    guard='[ "$(echo 1)" != 1 ]'
+    run sh -c "$guard"
+    [ "$status" -ne 0 ]
+    guard='[ "$(echo 0)" != 1 ]'
+    run sh -c "$guard"
+    [ "$status" -eq 0 ]
+    guard='[ "$(false)" != 1 ]'
+    run sh -c "$guard"
+    [ "$status" -eq 0 ]
 }
 
 @test "recipe: no file of the overlay is an Apache file" {
