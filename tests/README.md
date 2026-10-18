@@ -43,16 +43,22 @@ the spec.
   web server or a network. The compatibility names are run rather than
   inspected, once through a copy of the overlay made with `cp -TdR`, which is
   what `fab-apply-overlay` executes.
-- `keel-archive.bats`: unit tests of `conf.d/zzz-keel-archive`, the last conf
-  script, which enables the project's signed APT archive and refuses to unless
-  the key is in the image and the build time source is gone.
-- `archive-check.bats`: unit tests of `bin/keel-archive-check`, which the
-  Makefile runs twice per build so that the copy of the project archive inside
-  the build tree is the archive as it is at build time.
-- `project-packages.bats`: unit tests of `conf.d/zz-project-packages`, which
-  checks each project package against that archive. `dpkg`, `dpkg-query` and
-  `apt-cache` are `PATH` stubs reading fixtures, so no chroot and no apt are
-  needed.
+- `project-packages.bats`: unit tests of `bin/keel-project-packages`, which
+  `conf.d/main` runs at the end of the build. `dpkg-query` and `apt-cache` are
+  `PATH` stubs that answer what apt prints on trixie.
+- `apt-files.bats`: the recipe ships no apt source and no pin, and the project
+  packages are upgraded from the Keel archive and then proved to be its
+  candidates.
+- `image-check.bats`: `bin/keel-wordpress-image-check` against a scratch tree.
+- `recipe.bats`: the plan, the Makefile, the conf script, the cron job and the
+  changelog. Nothing of Apache is in them.
+- `nginx.bats`: the route of the site, `60-keel-wordpress.conf`: the refusals,
+  the order of the locations, the PHP handler and the catch-all.
+- `manifest.bats`: `wordpress.yaml` and the three example specs. With
+  `KEEL_SRC` (a checkout of keel) and `KEEL_MANIFEST_SOURCES` (checkouts of
+  keel-core, keel-web, keel-lnmp and common), it runs keel's own validator.
+  keel checks that the hooks are owned by root, so run it as root or with
+  `unshare -r`.
 - `coverage.sh`: runs the bats files under kcov and fails when any measured
   file is below `COVERAGE_THRESHOLD` (default 95).
 - `instance.yaml`: the spec the test container boots from. Not a real site: the
@@ -66,7 +72,9 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     bats tests/hook.bats
     bats tests/wrappers.bats
     bats tests/boot-test.bats
-    bats tests/keel-archive.bats
+    bats tests/recipe.bats
+    bats tests/nginx.bats
+    bats tests/image-check.bats
     bats tests/dialog.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
