@@ -200,6 +200,12 @@ WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
     wp eval-file "$INITHOOKS_PATH/lib/wordpress-verify-login.php" \
     || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
 
+# wp-cli ran as root above, and WordPress made the directory of the month in
+# wp-content/uploads while it installed. Root owns that directory, and the web
+# user could not write a media file in it. The tree belongs to the web user.
+chown -R "$WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER" "$WORDPRESS_ROOT/wp-content/uploads" \
+    || fatal "cannot give $WORDPRESS_ROOT/wp-content/uploads to $WORDPRESS_WEB_USER"
+
 start_web
 mark_ready
 
