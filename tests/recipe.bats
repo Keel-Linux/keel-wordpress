@@ -152,3 +152,16 @@ PY
     echo "$output"
     [ "$status" -eq 0 ]
 }
+
+@test "recipe: the boot test does not ask the archive: the runner of the image gate has no route to it" {
+    # The proofs of the update path need the network of the host, and the
+    # runner of the gate has none that reaches archive.keellinux.org (image
+    # gate run 15: "apt-get update could not fetch"). The apt files are
+    # Core's, and its boot test owns the update path. This test keeps the
+    # file checks: the sources are enabled and signed, and nothing of the
+    # build is left in the image.
+    run grep -nE 'apt-get (update|download|-y install)|apt-cache policy' "$REPO/tests/boot-test.sh"
+    [ "$status" -ne 0 ]
+    grep -q 'bt_sources_verdict' "$REPO/tests/boot-test.sh"
+    grep -q 'bt_build_leftovers_verdict' "$REPO/tests/boot-test.sh"
+}

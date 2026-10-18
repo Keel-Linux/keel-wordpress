@@ -91,9 +91,8 @@ Needs root, `keel` on `PATH`, LXC (`lxc-start`, `lxc-info`, `lxc-attach`,
 
 `--layers-dir` is a directory or an http(s) URL, so on the build host it is
 `/mnt/builds/layers` and on a runner it is the mirror. The other useful options
-are `--bridge`, `--cache-dir`, `--lxc-path`, `--name`, `--timeout`,
-`--skip-update` (leaves out the two APT proofs, for a host with no outbound
-network) and `--keep` (leaves the container running; then `lxc-attach -n
+are `--bridge`, `--cache-dir`, `--lxc-path`, `--name`, `--timeout`
+and `--keep` (leaves the container running; then `lxc-attach -n
 <name>`). `tests/boot-test.sh --help` lists them all.
 
 A bridge, not macvlan: the host has to be able to reach the container, because
@@ -141,24 +140,16 @@ What it proves, in order:
     the form and no cookie. Fetching the login page proves nothing, and a check
     that only ever tries the right password cannot tell a working login from a
     site that lets anybody in.
-12. **The update path**, in four steps, none of which needs a newer version to
-    exist on the day the test runs. The shipped `keel.sources` is enabled for
-    the signed `trixie` distribution with our keyring; `apt-get update` inside
-    the container reads `https://archive.keellinux.org` and says nothing that
-    means it could not verify the signature; `apt-cache policy inithooks` shows
-    our archive as the source of the candidate, at the 1001 the appliance's own
-    pin file sets; `apt-get download keel-transition`, a project package the
-    image has not got, brings it down from our archive against the digest the
-    signed index carries; and `apt-get install --reinstall` of a project
-    package the image has downloads it again and puts it through dpkg. apt
-    refuses an archive it cannot verify before it asks for a single byte, so
-    the last two are the signature reaching real files and not only an index.
-
-    All four stay inside our archive on purpose. The CI runner has no IPv4
-    route out, so a container there reaches ours, which is IPv6, and nothing of
-    Debian's; installing `keel-transition` outright also wants `gpgv`, which a
-    Debian 13 image does not carry because apt verifies with `sqv`, so that
-    step would be measuring the runner's network rather than the appliance.
+12. **The files of the update path**: the shipped `keel.sources` is enabled,
+    names the signed `trixie` and `trixie-testing` suites and a keyring that
+    the keys package installs, and none of the files the build used to reach
+    the project packages is left in the image. The proofs that ask the archive
+    over the network (`apt-get update`, the pin of 990, a download, a
+    reinstall) are not in this test. The runner of the image gate has no route
+    to the archive (image gate run 15), the apt files are Core's, and the
+    update path is the business of the boot test of Core. The older versions of
+    this test ran them against the published layer, and the evidence of
+    2026-09-27 in `COVERAGE.md` records that run.
 13. `keel diff --root <rootfs> --spec tests/instance.yaml`; exit 0 or 13 (no
     drift) passes.
 

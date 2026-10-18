@@ -25,13 +25,12 @@ setup() {
     [ "$BT_NAME" = keel-wordpress-boot-test ]
     [ "$BT_ROOTFS" = "$BT_DEFAULT_LXC_PATH/keel-wordpress-boot-test/rootfs" ]
     [ "$BT_KEEP" -eq 0 ]
-    [ "$BT_SKIP_UPDATE" -eq 0 ]
 }
 
 @test "parse_args takes every option" {
     bt_parse_args wordpress --timeout 60 --interval 2 --bridge br9 \
         --layers-dir https://mirror.example.org/layers --cache-dir /tmp/c \
-        --lxc-path /tmp/l --name demo.one --spec /tmp/s.yaml --keep --skip-update
+        --lxc-path /tmp/l --name demo.one --spec /tmp/s.yaml --keep
     [ "$BT_TIMEOUT" = 60 ]
     [ "$BT_INTERVAL" = 2 ]
     [ "$BT_BRIDGE" = br9 ]
@@ -41,7 +40,6 @@ setup() {
     [ "$BT_NAME" = demo.one ]
     [ "$BT_SPEC" = /tmp/s.yaml ]
     [ "$BT_KEEP" -eq 1 ]
-    [ "$BT_SKIP_UPDATE" -eq 1 ]
 }
 
 @test "parse_args refuses no appliance, two appliances and an unknown option" {
@@ -89,10 +87,9 @@ setup() {
     run bt_parse_args --help
     [ "$status" -eq 2 ]
     [[ "$output" == *"wp-login"* ]] || [[ "$output" == *"logs in"* ]]
-    [[ "$output" == *"apt-get update"* ]]
-    [[ "$output" == *"apt-get install"* ]]
-    [[ "$output" == *"apt-get download"* ]]
-    [[ "$output" == *"apt-cache policy"* ]]
+    [[ "$output" == *"REST API"* ]]
+    [[ "$output" == *"apt sources of the archive"* ]]
+    [[ "$output" != *"apt-get update"* ]]
 }
 
 @test "container_name and the name predicates" {
@@ -611,200 +608,6 @@ EOF
     [[ "$output" == *"is signed by"* ]]
 }
 
-@test "apt_update_verdict passes when our archive was read and nothing complained" {
-    printf 'Get:8 https://archive.keellinux.org trixie InRelease [1867 B]\nReading package lists...\n' > "$S/out"
-    run bt_apt_update_verdict 0 "$S/out"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"verified its signature"* ]]
-}
-
-@test "apt_update_verdict refuses a non zero exit" {
-    : > "$S/out"
-    run bt_apt_update_verdict 100 "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"exited 100"* ]]
-}
-
-@test "apt_update_verdict refuses every way apt says it could not verify" {
-    for complaint in NO_PUBKEY 'is not signed' 'not have a Release file' \
-        EXPKEYSIG REVKEYSIG BADSIG 'insufficiently signed' 'cannot be authenticated'; do
-        printf 'Get:8 https://archive.keellinux.org trixie InRelease\nW: %s\n' "$complaint" > "$S/out"
-        run bt_apt_update_verdict 0 "$S/out"
-        [ "$status" -eq 1 ]
-        [[ "$output" == *"could not verify the archive"* ]]
-    done
-}
-
-@test "apt_update_verdict refuses a run that never reached our archive" {
-    printf 'Get:1 http://deb.debian.org/debian trixie InRelease\n' > "$S/out"
-    run bt_apt_update_verdict 0 "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"never reached"* ]]
-}
-
-_policy() {
-    cat > "$S/policy" <<EOF
-inithooks:
-  Installed: ${1:-2.3.6+keel4}
-  Candidate: ${2:-2.3.6+keel5}
-  Version table:
-     ${2:-2.3.6+keel5} ${3:-990}
-        ${3:-990} ${4:-https://archive.keellinux.org} trixie/main amd64 Packages
- *** ${1:-2.3.6+keel4} 100
-        100 /var/lib/dpkg/status
-EOF
-}
-
-@test "policy_verdict passes when the candidate comes from our archive at our pin" {
-    _policy
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"takes inithooks from https://archive.keellinux.org at priority 990"* ]]
-    [[ "$output" == *"candidate 2.3.6+keel5"* ]]
-}
-
-@test "policy_verdict passes when the archive offers exactly what is installed" {
-    # the ordinary state of a current appliance, and not a failure
-    _policy 2.3.6+keel5 2.3.6+keel5
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 0 ]
-}
-
-@test "policy_verdict reads apt's own layout for an installed candidate" {
-    # what apt-cache policy printed inside the appliance in the boot gate on
-    # 2026-09-30, once the gate could reach the archive (tracker#5): one line
-    # for the version, marked ***, and both of its sources under it
-    cat > "$S/policy" <<EOF
-inithooks:
-  Installed: 2.3.6+keel5
-  Candidate: 2.3.6+keel5
-  Version table:
- *** 2.3.6+keel5 990
-       990 https://archive.keellinux.org trixie/main amd64 Packages
-        100 /var/lib/dpkg/status
-EOF
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"candidate 2.3.6+keel5"* ]]
-}
-
-@test "policy_verdict refuses an installed candidate from another source at our pin" {
-    # a repository that calls itself our origin gets our pin too; the
-    # candidate must come from our archive, not merely share its priority
-    cat > "$S/policy" <<EOF
-inithooks:
-  Installed: 2.3.6+evil
-  Candidate: 2.3.6+evil
-  Version table:
- *** 2.3.6+evil 990
-       990 http://mirror.example.org trixie/main amd64 Packages
-        100 /var/lib/dpkg/status
-     2.3.6+keel5 990
-       990 https://archive.keellinux.org trixie/main amd64 Packages
-EOF
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"does not come from"* ]]
-}
-
-@test "policy_verdict refuses a package apt has no candidate for" {
-    printf 'inithooks:\n  Installed: (none)\n  Candidate: (none)\n' > "$S/policy"
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"no candidate"* ]]
-}
-
-@test "policy_verdict refuses an archive that is not a source at our pin" {
-    _policy 2.3.6+keel4 2.3.6+keel5 500
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"not a source of inithooks at priority 990"* ]]
-}
-
-@test "policy_verdict refuses a candidate that comes from somewhere else" {
-    cat > "$S/policy" <<EOF
-inithooks:
-  Installed: 2.3.6+keel4
-  Candidate: 9.9.9
-  Version table:
-     9.9.9 990
-        990 http://deb.debian.org/debian trixie/main amd64 Packages
-     2.3.6+keel5 990
-        990 https://archive.keellinux.org trixie/main amd64 Packages
-EOF
-    run bt_policy_verdict inithooks "$S/policy"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"does not come from"* ]]
-}
-
-@test "absent_verdict wants the package not installed before the proof" {
-    run bt_absent_verdict keel-transition "unknown ok not-installed"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"is not in the image"* ]]
-    run bt_absent_verdict keel-transition ""
-    [ "$status" -eq 0 ]
-    run bt_absent_verdict keel-transition "install ok installed"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"would prove nothing"* ]]
-}
-
-@test "download_verdict passes when apt fetched the deb from our archive" {
-    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
-    run bt_download_verdict keel-transition 0 13836 "$S/out"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"fetched keel-transition from https://archive.keellinux.org"* ]]
-    [[ "$output" == *"13836 bytes"* ]]
-}
-
-@test "download_verdict refuses a non zero exit, another archive and a missing file" {
-    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out"
-    run bt_download_verdict keel-transition 100 13836 "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"exited 100"* ]]
-    printf 'Get:1 http://deb.debian.org/debian trixie/main amd64 keel-transition all 0.1.1\n' > "$S/out2"
-    run bt_download_verdict keel-transition 0 13836 "$S/out2"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"did not fetch keel-transition from"* ]]
-    run bt_download_verdict keel-transition 0 0 "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"left no file"* ]]
-    run bt_download_verdict keel-transition 0 "" "$S/out"
-    [ "$status" -eq 1 ]
-}
-
-@test "install_verdict passes when apt fetched it from our archive and dpkg configured it" {
-    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-archive-keyring all 0.1.1 [4904 B]\n' > "$S/out"
-    run bt_install_verdict keel-archive-keyring 0 0.1.1 "install ok installed" "$S/out"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"fetched and reinstalled keel-archive-keyring 0.1.1"* ]]
-}
-
-@test "install_verdict refuses a non zero exit" {
-    : > "$S/out"
-    run bt_install_verdict keel-archive-keyring 100 "" "" "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"exited 100"* ]]
-}
-
-@test "install_verdict refuses a package that came from anywhere but our archive" {
-    printf 'Get:1 http://deb.debian.org/debian trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
-    run bt_install_verdict keel-transition 0 0.1.1 "install ok installed" "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"did not fetch keel-transition from"* ]]
-}
-
-@test "install_verdict refuses a half configured package and one with no version" {
-    printf 'Get:1 https://archive.keellinux.org trixie/main amd64 keel-transition all 0.1.1 [13.8 kB]\n' > "$S/out"
-    run bt_install_verdict keel-transition 0 0.1.1 "install ok unpacked" "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"not 'install ok installed'"* ]]
-    run bt_install_verdict keel-transition 0 "" "install ok installed" "$S/out"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"no version after the install"* ]]
-}
-
-# --- keel diff --------------------------------------------------------------
-
 @test "diff_verdict reads 0 and 13 as no drift" {
     run bt_diff_verdict 0
     [ "$status" -eq 0 ]
@@ -828,27 +631,3 @@ EOF
     [[ "$output" == *"failed with exit 9"* ]]
 }
 
-@test "apt_update_verdict refuses an update that could not fetch the archive" {
-    out=$BATS_TEST_TMPDIR/update.txt
-    printf '%s\n' \
-        "Hit:1 https://deb.debian.org/debian trixie InRelease" \
-        "W: Failed to fetch https://archive.keellinux.org/dists/trixie/InRelease  SSL connection failed [IP: 127.0.1.1 443]" \
-        "W: Some index files failed to download. They have been ignored, or old ones used instead." \
-        > "$out"
-
-    run bt_apt_update_verdict 0 "$out"
-
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"could not fetch"* ]]
-}
-
-@test "archive_reachable refuses a loopback answer and accepts a routable one" {
-    run bt_archive_reachable "127.0.1.1     archive.keellinux.org"
-    [ "$status" -ne 0 ]
-    run bt_archive_reachable "::1           archive.keellinux.org"
-    [ "$status" -ne 0 ]
-    run bt_archive_reachable "2804:710:d0:5::13 STREAM archive.keellinux.org"
-    [ "$status" -eq 0 ]
-    run bt_archive_reachable ""
-    [ "$status" -ne 0 ]
-}
