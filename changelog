@@ -1,3 +1,13 @@
+keel-wordpress-19.0 (9) keel; urgency=medium
+
+  * A JSON write to /wp-json/ may be 1 MiB (Keel-Linux/common#61).
+    keel-overlay-coraza 0.1.4 refuses a JSON body of more than 256 KiB, and
+    a block editor save of a long post is larger. Rule 10102 of
+    keel-wordpress-before.conf sets the limit again, for these writes only.
+    19.0-8 is a testing build with the 256 KiB limit.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 17:00:00 +0000
+
 keel-wordpress-19.0 (8) keel; urgency=medium
 
   * A media upload of up to 64 MB works behind Anubis and Coraza

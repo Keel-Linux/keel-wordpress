@@ -26,9 +26,20 @@ rules() {
     [[ "$(basename "$RULES")" == *-before.conf ]]
 }
 
-@test "waf: one rule, id 10101 (Keel's local ids are 10000 to 10199), phase 1, nolog" {
-    [ "$(rules | grep -c 'id:')" = 1 ]
+@test "waf: two rules, ids 10101 and 10102 (Keel's local ids are 10000 to 10199), phase 1, nolog" {
+    [ "$(rules | grep -c 'id:')" = 2 ]
     rules | grep -qF 'id:10101,phase:1,pass,nolog,t:none,chain'
+    rules | grep -qF 'id:10102,phase:1,pass,nolog,t:none,chain'
+}
+
+# keel-overlay-coraza 0.1.4 refuses a JSON body of more than 256 KiB
+# (Keel-Linux/common#61). A block editor save of a long post is larger. A
+# later ctl in phase 1 sets the limit again, to 1 MiB, for these writes.
+@test "waf: a JSON write to /wp-json/ may be 1 MiB, and no more" {
+    rules | grep -qF 'ctl:requestBodyLimit=1048576'
+    [ "$(rules | grep -c 'requestBodyLimit')" = 1 ]
+    run bash -c "grep -vE '^\s*#' '$RULES' | grep -E 'requestBodyAccess|requestBodyLimit=[0-9]{8,}'"
+    [ "$status" -ne 0 ]
 }
 
 @test "waf: it looks at writes to /wp-json/ with a JSON content type, and nothing else" {
@@ -47,6 +58,8 @@ rules() {
     run bash -c "grep -vE '^\s*#' '$RULES' | grep -E 'ARGS_NAMES|OWASP_CRS;ARGS[,\"]'"
     [ "$status" -ne 0 ]
     [ "$(rules | grep -c 'ruleRemoveTarget')" = 1 ]
+    # the second rule changes the limit of the body and nothing else
+    [ "$(rules | grep -c 'ctl:')" = 2 ]
 }
 
 @test "waf: the file says why, and that the JSON body processor of Coraza is needed" {
