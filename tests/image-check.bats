@@ -140,3 +140,10 @@ setup() {
     [[ "$output" == *"apache2 is installed"* ]]
     [[ "$output" == *"mariadb.socket is not masked"* ]]
 }
+
+@test "a missing cron job fails the build" {
+    rm "$T/etc/cron.d/wordpress-cron"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"wordpress-cron is not in the image"* ]]
+}

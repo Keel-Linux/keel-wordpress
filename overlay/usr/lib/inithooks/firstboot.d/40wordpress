@@ -67,7 +67,8 @@ db_name=$(wordpress_db_name "${APP_DB_NAME-}") \
 db_prefix=$(wordpress_db_prefix "${APP_DB_PREFIX-}") \
     || fatal "'${APP_DB_PREFIX-}' is not a table prefix this appliance will use"
 
-role=$(wordpress_spec_role "$WORDPRESS_SPEC")
+role=$(wordpress_spec_role "$WORDPRESS_SPEC") \
+    || fatal "cannot read database.server.role from $WORDPRESS_SPEC: a node that may be a replica writes nothing until it can"
 
 mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}" "$role")
 if [[ ${#missing[@]} -gt 0 ]]; then
@@ -116,6 +117,13 @@ write_config() {
         "$WORDPRESS_DB_HOST, password from DB_PASS $(wordpress_masked "$DB_PASS")"
 }
 
+# The site is open from here on. Until this file exists the route of the site
+# answers 503 (60-keel-wordpress.conf), so the installer is never offered.
+mark_ready() {
+    : > "$WORDPRESS_READY" || fatal "cannot write $WORDPRESS_READY"
+    chmod 0644 "$WORDPRESS_READY"
+}
+
 start_web() {
     # The web server serves the site from now on. It is started rather than
     # assumed, and never restarted: its site is a static file of keel-web and
@@ -127,6 +135,7 @@ start_web() {
 if [[ "$replica" == true ]]; then
     write_config
     start_web
+    mark_ready
     echo "this node is a replica (role '${role:-none}', read_only $read_only): the" \
         "WordPress site and its database come from the primary; nothing was" \
         "written to the database"
@@ -137,6 +146,8 @@ fi
 # then the account is asked whether it reaches it.
 mysql --batch --execute="$(wordpress_create_database_sql "$db_name")" \
     || fatal "cannot create the database '$db_name' on $WORDPRESS_DB_SERVICE"
+mysql --batch --execute="$(wordpress_grant_sql "$db_name" "$db_user")" \
+    || fatal "cannot grant '$db_user' the database '$db_name' on $WORDPRESS_DB_SERVICE"
 MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
     --protocol=TCP --batch --skip-column-names \
     --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
@@ -190,6 +201,7 @@ WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
     || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
 
 start_web
+mark_ready
 
 echo "WordPress administrator '$admin_user' set from APP_PASS" \
      "$(wordpress_masked "$APP_PASS"), authenticated against the site itself"

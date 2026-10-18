@@ -332,14 +332,24 @@ setup() {
     [ "$output" = "" ]
 }
 
-@test "spec_role is empty for a spec that is missing or is not YAML" {
+@test "spec_role is empty for a spec that is missing: a machine with no spec has no pair" {
     run wordpress_spec_role "$BATS_TEST_TMPDIR/none.yaml"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
+}
+
+@test "spec_role fails for a spec that exists and cannot be read as a mapping" {
+    # A role that cannot be read must not become "no role": a replica would
+    # then make a schema and a site of its own.
     printf 'a: [unclosed\n' > "$BATS_TEST_TMPDIR/bad.yaml"
     run wordpress_spec_role "$BATS_TEST_TMPDIR/bad.yaml"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    [ "$status" -ne 0 ]
+    printf -- '- a\n- b\n' > "$BATS_TEST_TMPDIR/list.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/list.yaml"
+    [ "$status" -ne 0 ]
+    printf 'database:\n  - server\n' > "$BATS_TEST_TMPDIR/db.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/db.yaml"
+    [ "$status" -ne 0 ]
 }
 
 @test "is_replica is true for the role replica and for a server that is read only" {
@@ -385,4 +395,26 @@ setup() {
 
 @test "the permalink structure is the post name" {
     [ "$WORDPRESS_PERMALINKS" = "/%postname%/" ]
+}
+
+@test "grant_sql grants the account its schema on the three hosts" {
+    run wordpress_grant_sql site wp_user
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "${lines[0]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'localhost';" ]
+    [ "${lines[1]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'::1';" ]
+    [ "${lines[2]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'127.0.0.1';" ]
+}
+
+@test "grant_sql refuses a name or an account that would need quoting" {
+    run wordpress_grant_sql 'a b' wp_user
+    [ "$status" -ne 0 ]
+    run wordpress_grant_sql site "x'; DROP USER y; --"
+    [ "$status" -ne 0 ]
+    run wordpress_grant_sql "" wp_user
+    [ "$status" -ne 0 ]
+}
+
+@test "the ready marker is a file beside the WordPress tree, not in it" {
+    [[ "$WORDPRESS_READY" == /var/www/.keel-wordpress-ready ]]
 }

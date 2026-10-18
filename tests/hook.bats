@@ -100,6 +100,7 @@ EOF
     export WORDPRESS_CONFIG="$WPROOT/wp-config.php"
     # no spec: a standalone machine, which is what the role guard reads
     export WORDPRESS_SPEC="$SCRATCH/instance.yaml"
+    export WORDPRESS_READY="$SCRATCH/ready"
     # a salt source with no entropy, so the rendered file is comparable
     export WORDPRESS_RANDOM="echo AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     # the web user of the scratch tree is whoever is running the tests
@@ -511,4 +512,56 @@ _replica_spec() {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
     [[ "$output" == *"WordPress installed"* ]]
+}
+
+# --- the site is closed until the hook is done --------------------------------
+# nginx may be up before the first boot ends. Until the marker exists the
+# route answers 503, so nobody reaches the WordPress installer in the window
+# between wp-config.php and the end of the installation.
+
+@test "the ready marker is written at the end of an installation" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ -f "$WORDPRESS_READY" ]
+    [ "$(stat -c %a "$WORDPRESS_READY")" = 644 ]
+}
+
+@test "the ready marker is written on a replica too" {
+    _replica_spec
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ -f "$WORDPRESS_READY" ]
+}
+
+@test "no ready marker when the installation fails" {
+    export WP_TEST_FAIL=core
+    run bash "$HOOK"
+    [ "$status" -ne 0 ]
+    [ ! -e "$WORDPRESS_READY" ]
+}
+
+@test "the ready marker is written after the password was authenticated" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"authenticated against the site itself"* ]]
+    [ -f "$WORDPRESS_READY" ]
+}
+
+@test "the account is granted the schema on every host before it is asked to reach it" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    grant=$(grep -n "GRANT ALL PRIVILEGES ON \`wordpress\`" "$CALLS" | head -1 | cut -d: -f1)
+    reach=$(grep -n "information_schema.schemata" "$CALLS" | head -1 | cut -d: -f1)
+    [ -n "$grant" ]
+    [ "$grant" -lt "$reach" ]
+}
+
+@test "a spec that cannot be read stops the hook before it writes anything" {
+    printf 'database: [unclosed\n' > "$WORDPRESS_SPEC"
+    run bash "$HOOK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cannot read database.server.role"* ]]
+    run grep -cE "CREATE DATABASE|core install" "$CALLS"
+    [ "$output" = "0" ]
+    [ ! -e "$WPROOT/wp-config.php" ]
 }

@@ -68,16 +68,16 @@ at() {
     [ "$output" = 1 ]
 }
 
-@test "route: wp-config.php and its sample are refused" {
-    route | grep -qF 'location ~* ^/wp-config(?:-sample)?\.php$ {'
+@test "route: wp-config.php, its sample and every copy of it are refused" {
+    route | grep -qF 'location ~* ^/wp-config {'
 }
 
 @test "route: PHP in the directories the web user writes is refused" {
     route | grep -qF 'location ~* ^/wp-content/(?:uploads|cache|upgrade|upgrade-temp-backup)/.*\.(?:php|phtml|phar)$ {'
 }
 
-@test "route: the PHP files of wp-includes and wp-admin/includes are refused, one level only" {
-    route | grep -qF 'location ~* ^/wp-(?:includes|admin/includes)/[^/]*\.php$ {'
+@test "route: every PHP file of wp-includes and wp-admin/includes is refused but the tinymce compressor" {
+    route | grep -qF 'location ~* ^/wp-(?:includes|admin/includes)/(?!js/tinymce/wp-tinymce\.php$).*\.php$ {'
 }
 
 @test "route: hidden files and directories are refused, .well-known is not" {
@@ -106,7 +106,7 @@ at() {
 }
 
 @test "route: log, backup and dump files are refused" {
-    route | grep -qF 'location ~* \.(?:log|bak|orig|swp|sql)$ {'
+    route | grep -qF 'location ~* \.(?:log|bak|orig|old|save|dist|swp|sql)$ {'
 }
 
 @test "route: the three headers every response of the site carries" {
@@ -123,4 +123,20 @@ at() {
 @test "route: nothing of Apache and no .htaccess rule" {
     run bash -c "grep -vE '^\s*#' '$ROUTE' | grep -iE 'apache|htaccess'"
     [ "$status" -ne 0 ]
+}
+
+@test "route: the site answers 503 until the hook has written the ready marker, in both locations" {
+    n=$(route | grep -cF 'if (!-f /var/www/.keel-wordpress-ready) {')
+    [ "$n" = 2 ]
+    [ "$(route | grep -cF 'return 503;')" = 2 ]
+}
+
+@test "route: the PHP handler hides the headers that the route adds, so a response has each once" {
+    route | grep -qF 'fastcgi_hide_header X-Frame-Options;'
+    route | grep -qF 'fastcgi_hide_header X-Content-Type-Options;'
+}
+
+@test "route: a stack prefix location that is not exact must be ^~, and the file says so" {
+    grep -qF '^~' "$ROUTE"
+    grep -qiE 'any other prefix location' "$ROUTE"
 }

@@ -91,7 +91,9 @@ for path in mariadb.yaml postgresql.yaml; do
     fi
 done
 
-if grep -vE '^[[:space:]]*#' "$root/etc/cron.d/wordpress-cron" 2>/dev/null | grep -qE 'curl|wp-cron\.php'; then
+if [ ! -f "$root/etc/cron.d/wordpress-cron" ]; then
+    fatal "/etc/cron.d/wordpress-cron is not in the image: WordPress would never run its scheduled work"
+elif grep -vE '^[[:space:]]*#' "$root/etc/cron.d/wordpress-cron" | grep -qE 'curl|wp-cron\.php'; then
     fatal "/etc/cron.d/wordpress-cron goes through the web server: it would get the 404 of the health probe"
 fi
 

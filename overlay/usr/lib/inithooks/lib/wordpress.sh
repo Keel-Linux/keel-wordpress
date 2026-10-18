@@ -35,6 +35,12 @@ WORDPRESS_WEB_SERVICE="${WORDPRESS_WEB_SERVICE:-nginx}"
 # serves a pretty permalink with try_files, so no .htaccess is needed.
 WORDPRESS_SPEC="${WORDPRESS_SPEC:-/etc/keel/instance.yaml}"
 WORDPRESS_PERMALINKS="${WORDPRESS_PERMALINKS:-/%postname%/}"
+# The marker that opens the site. nginx may be up before the first boot ends,
+# so the route answers 503 until this file exists (60-keel-wordpress.conf),
+# and nobody reaches the WordPress installer in the window between
+# wp-config.php and the end of the installation. It is beside the WordPress
+# tree and not in it, so an update of core never touches it.
+WORDPRESS_READY="${WORDPRESS_READY:-/var/www/.keel-wordpress-ready}"
 WORDPRESS_WAIT_TRIES="${WORDPRESS_WAIT_TRIES:-30}"
 # The eight keys wp-config.php carries. WordPress asks its own API for them;
 # a first boot must not need the internet, so they are generated here.
@@ -156,15 +162,26 @@ wordpress_missing_values() {
 }
 
 # wordpress_spec_role [SPEC]: database.server.role of the instance
-# description, or nothing when the file is missing, is not YAML or declares
-# no role. Never fails: a machine with no pair declares no role.
+# description, or nothing when the file is missing or declares no role. A
+# machine with no spec has no pair. A spec that exists and cannot be read as
+# a mapping is an error and not "no role": a replica would then make a schema
+# and a site of its own.
 wordpress_spec_role() {
     local spec=${1:-$WORDPRESS_SPEC}
-    [[ -r "$spec" ]] || return 0
-    python3 - "$spec" <<'PY' 2>/dev/null || true
+    [[ -e "$spec" ]] || return 0
+    python3 - "$spec" <<'PY'
 import sys, yaml
-spec = yaml.safe_load(open(sys.argv[1])) or {}
-print(((spec.get("database") or {}).get("server") or {}).get("role") or "")
+
+def mapping(value, name):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        sys.exit("%s is not a mapping" % name)
+    return value
+
+spec = mapping(yaml.safe_load(open(sys.argv[1])), "the spec")
+server = mapping(mapping(spec.get("database"), "database").get("server"), "database.server")
+print(server.get("role") or "")
 PY
 }
 
@@ -179,6 +196,19 @@ wordpress_is_replica() {
         1|ON) return 0 ;;
     esac
     return 1
+}
+
+# wordpress_grant_sql NAME USER: the statements that give the account its
+# schema, one for each host the image created it for. The image grants the
+# default schema only; a schema with another name (app.options.db_name)
+# needs these. GRANT adds and does nothing the second time.
+wordpress_grant_sql() {
+    local host
+    wordpress_is_ident "${1-}" || return 1
+    wordpress_is_ident "${2-}" || return 1
+    for host in localhost ::1 127.0.0.1; do
+        printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%s';\n" "$1" "$2" "$host"
+    done
 }
 
 # wordpress_create_database_sql NAME: the statement that makes the schema.
