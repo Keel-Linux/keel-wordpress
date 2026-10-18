@@ -1,3 +1,17 @@
+keel-wordpress-19.0 (7) keel; urgency=medium
+
+  * A media upload of up to 64 MB works behind Anubis and Coraza
+    (Keel-Linux/keel-web#15). /etc/nginx/keel-front.d/60-keel-wordpress.conf
+    sets the body limit of the front site, which keel-web 0.3.1 includes.
+    The memory of a worker stays bounded with keel-overlay-coraza 0.1.4: an
+    upload of 32 MiB costs about 10 MiB. The build fails without the file.
+  * The exclusion of the REST API for Coraza reads only the content fields
+    of the post (json.content, json.title, json.excerpt) now that
+    keel-overlay-coraza 0.1.4 selects the JSON body processor
+    (Keel-Linux/common#59). Every other field keeps its rules.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 12:00:00 +0000
+
 keel-wordpress-19.0 (6) keel; urgency=medium
 
   * WordPress is a layer on lnmp and is served by nginx and PHP-FPM

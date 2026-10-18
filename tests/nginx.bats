@@ -12,6 +12,7 @@ bats_require_minimum_version 1.5.0
 setup() {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     ROUTE="$REPO/overlay/etc/nginx/keel-default.d/60-keel-wordpress.conf"
+    FRONT="$REPO/overlay/etc/nginx/keel-front.d/60-keel-wordpress.conf"
 }
 
 route() {
@@ -139,4 +140,20 @@ at() {
 @test "route: a stack prefix location that is not exact must be ^~, and the file says so" {
     grep -qF '^~' "$ROUTE"
     grep -qiE 'any other prefix location' "$ROUTE"
+}
+
+# Keel-Linux/keel-web#15. Behind Anubis the front site of Keel Web limits a
+# body to 1 MB before it reaches this route, so a media upload needs a limit
+# in the front too. keel-web 0.3.1 includes /etc/nginx/keel-front.d/*.conf
+# in the front server, after its own limit.
+@test "front: the layer sets the body limit of the front site in keel-front.d, as the route does" {
+    [ -f "$FRONT" ]
+    [ "$(grep -vE '^\s*(#|$)' "$FRONT")" = "client_max_body_size 64m;" ]
+    route | grep -qF 'client_max_body_size 64m;'
+    grep -qE '^PHP_UPLOAD_MAX_FILESIZE ?[:?]?= ?64M' "$REPO/Makefile"
+}
+
+@test "front: the file says what it needs: keel-web 0.3.1 and keel-overlay-coraza 0.1.4" {
+    grep -q 'keel-web 0.3.1' "$FRONT"
+    grep -q 'keel-overlay-coraza 0.1.4' "$FRONT"
 }

@@ -78,6 +78,7 @@ if [ -e "$root/var/lib/mysql/wordpress" ]; then
 fi
 
 for path in /etc/nginx/keel-default.d/60-keel-wordpress.conf \
+        /etc/nginx/keel-front.d/60-keel-wordpress.conf \
         /usr/share/keel/appliances/wordpress.yaml \
         /usr/share/keel/appliances/lnmp.yaml; do
     if [ ! -f "$root$path" ]; then

@@ -147,6 +147,10 @@ ROUTE=/etc/nginx/keel-default.d/60-keel-wordpress.conf
 [ -f "$ROUTE" ] || fatal "$ROUTE is not in the image"
 grep -qxF '	include /etc/nginx/keel-default.d/*.conf;' /etc/nginx/sites-available/keel-default \
     || fatal "the default site of keel-web does not include keel-default.d: keel-web 0.3.0 is the least"
+FRONT=/etc/nginx/keel-front.d/60-keel-wordpress.conf
+[ -f "$FRONT" ] || fatal "$FRONT is not in the image"
+grep -qxF '	include /etc/nginx/keel-front.d/*.conf;' /etc/nginx/sites-available/default-anubis \
+    || fatal "the front site of keel-web does not include keel-front.d: keel-web 0.3.1 is the least"
 NGINX_TEST=/etc/nginx/keel-wordpress-test.conf
 cat > "$NGINX_TEST" <<'EOF'
 pid /run/keel-wordpress-test.pid;

@@ -514,6 +514,42 @@ _replica_spec() {
     [[ "$output" == *"WordPress installed"* ]]
 }
 
+# --- the media library -------------------------------------------------------
+# wp-cli runs as root in the hook (wp --allow-root), and WordPress makes the
+# directory of the month in wp-content/uploads when it installs. Left to
+# root, that directory refuses every upload of the web user: the REST API
+# answers "could not be moved to wp-content/uploads/2026/10" (found by the
+# upload test of Keel-Linux/keel-web#15).
+
+@test "the uploads tree belongs to the web user once the site is installed, before the web server starts" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    local chown_line option_line start_line
+    chown_line="$(grep -n "^chown -R $WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER $WPROOT/wp-content/uploads\$" "$CALLS" | head -1 | cut -d: -f1)"
+    option_line="$(grep -n "^wp .*option update admin_email" "$CALLS" | head -1 | cut -d: -f1)"
+    start_line="$(grep -n "^systemctl start nginx.service" "$CALLS" | head -1 | cut -d: -f1)"
+    [ -n "$chown_line" ]
+    [ "$chown_line" -gt "$option_line" ]
+    [ "$chown_line" -lt "$start_line" ]
+}
+
+@test "an installed site gets the same owner for the uploads tree when the hook runs again" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    : > "$CALLS"
+    WP_TEST_INSTALLED=1 run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    grep -q "^chown -R $WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER $WPROOT/wp-content/uploads\$" "$CALLS"
+}
+
+@test "a replica does not touch the uploads tree" {
+    _replica_spec
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    run grep -c "wp-content/uploads" "$CALLS"
+    [ "$output" = 0 ]
+}
+
 # --- the site is closed until the hook is done --------------------------------
 # nginx may be up before the first boot ends. Until the marker exists the
 # route answers 503, so nobody reaches the WordPress installer in the window
