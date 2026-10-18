@@ -91,13 +91,15 @@ The appliance has a manifest, ``wordpress.yaml`` (base ``lnmp``), so an
 instance description names it with ``appliance.name: wordpress``. The database
 account is lnmp's option ``db_user``: set it to ``wordpress``.
 
-Behind Anubis and Coraza (the cloud modes) two limits apply that this layer
-cannot remove. The front site of Keel Web accepts a request body of 1 MB at
-most, so a larger media upload answers 413. Coraza needs about 500 times the
-size of a body in memory, so that limit also protects the machine. And Coraza
-does not select the JSON body processor, so the Core Rule Set would block the
-block editor: ``/etc/coreruleset/plugins/keel-wordpress-before.conf`` keeps the
-rules from reading the arguments of a JSON write to ``/wp-json/``.
+Behind Anubis and Coraza (the cloud modes) two files of this layer make the
+site work. ``/etc/nginx/keel-front.d/60-keel-wordpress.conf`` sets the body
+limit of the front site of Keel Web to 64 MB, as PHP has it (the front site
+has 1 MB without it, and answers 413 to a media upload). It needs keel-web
+0.3.1. The files of an upload are no argument for Coraza (keel-overlay-coraza
+0.1.4), so a worker keeps its memory: an upload of 32 MiB costs about 10 MiB.
+And ``/etc/coreruleset/plugins/keel-wordpress-before.conf`` keeps the Core
+Rule Set from reading the content fields of a JSON write to ``/wp-json/``,
+because the rules take the HTML of the blocks of the editor as an attack.
 
 A replica gets ``wp-config.php`` and nothing in the database. The WordPress
 schema is made by the first boot of a primary or a standalone node and not by

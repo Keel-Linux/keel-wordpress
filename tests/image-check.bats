@@ -12,7 +12,7 @@ setup() {
     T="$BATS_TEST_TMPDIR/tree"
     export KEEL_CONF_ROOT="$T"
     mkdir -p "$T/etc/systemd/system/multi-user.target.wants" "$T/var/lib/dpkg" \
-        "$T/etc/nginx/keel-default.d" "$T/usr/share/keel/appliances" \
+        "$T/etc/nginx/keel-default.d" "$T/etc/nginx/keel-front.d" "$T/usr/share/keel/appliances" \
         "$T/etc/php/8.4/fpm" "$T/var/www/wordpress/wp-includes" \
         "$T/var/www/wordpress/wp-content" "$T/etc/cron.d" "$T/var/lib/mysql/mysql"
     ln -s /dev/null "$T/etc/systemd/system/mariadb.socket"
@@ -22,6 +22,7 @@ setup() {
     printf 'Package: nginx\nStatus: install ok installed\n\nPackage: php8.4-fpm\nStatus: install ok installed\n\n' \
         > "$T/var/lib/dpkg/status"
     cp "$REPO/overlay/etc/nginx/keel-default.d/60-keel-wordpress.conf" "$T/etc/nginx/keel-default.d/"
+    cp "$REPO/overlay/etc/nginx/keel-front.d/60-keel-wordpress.conf" "$T/etc/nginx/keel-front.d/"
     cp "$REPO/overlay/etc/cron.d/wordpress-cron" "$T/etc/cron.d/"
     cp "$REPO/overlay/usr/share/keel/appliances/wordpress.yaml" "$T/usr/share/keel/appliances/"
     : > "$T/usr/share/keel/appliances/lnmp.yaml"
@@ -80,6 +81,13 @@ setup() {
     [[ "$output" == *"60-keel-wordpress.conf"* ]]
     [[ "$output" == *"wordpress.yaml"* ]]
     [[ "$output" == *"version.php"* ]]
+}
+
+@test "a missing front limit fails the build: an upload of more than 1 MB would answer 413" {
+    rm "$T/etc/nginx/keel-front.d/60-keel-wordpress.conf"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"keel-front.d/60-keel-wordpress.conf is not in the image"* ]]
 }
 
 @test "the manifest of lnmp must be there: the chain is not complete without it" {

@@ -1,9 +1,11 @@
 #!/usr/bin/env bats
 # The exclusion of the WordPress REST API for Coraza (handbook decision 0030,
 # overlay coraza). In the cloud modes Coraza reads the JSON body of a request
-# as the name of one argument, because the overlay does not select the JSON
-# body processor, and the Core Rule Set then blocks the HTML of every block
-# of the editor (rule 941180, "<!--" in ARGS_NAMES). The file is read by the
+# as the name of one argument, because the overlay did not select the JSON
+# body processor (Keel-Linux/common#59, fixed in keel-overlay-coraza 0.1.4).
+# Now the fields of the post are json.content, json.title and json.excerpt,
+# and the Core Rule Set still blocks the HTML of the blocks of the editor in
+# them (rules 941160, 941180, 942190 and others). The file is read by the
 # rule set before its own rules, from the plugins directory that the
 # coreruleset package provides. These read the file; the cross-site release
 # test saves a post through the REST API, behind Anubis and Coraza.
@@ -35,14 +37,20 @@ rules() {
     rules | grep -qF 'SecRule REQUEST_HEADERS:Content-Type "@rx ^application/json"'
 }
 
-@test "waf: it removes the arguments as a target of the Core Rule Set rules, and no rule" {
-    rules | grep -qF 'ctl:ruleRemoveTargetByTag=OWASP_CRS;ARGS,'
-    rules | grep -qF 'ctl:ruleRemoveTargetByTag=OWASP_CRS;ARGS_NAMES'
+@test "waf: it removes the content fields of the post as a target of the Core Rule Set rules, and no rule" {
+    rules | grep -qF 'ctl:ruleRemoveTargetByTag=OWASP_CRS;ARGS:/^json\.(?:content|title|excerpt)(?:\.raw)?$/'
     run bash -c "grep -vE '^\s*#' '$RULES' | grep -E 'ruleRemoveById|ruleEngine|SecRuleRemove'"
     [ "$status" -ne 0 ]
 }
 
-@test "waf: the file says why, and what to do when the JSON processor arrives" {
+@test "waf: every other argument and every name keeps its rules" {
+    run bash -c "grep -vE '^\s*#' '$RULES' | grep -E 'ARGS_NAMES|OWASP_CRS;ARGS[,\"]'"
+    [ "$status" -ne 0 ]
+    [ "$(rules | grep -c 'ruleRemoveTarget')" = 1 ]
+}
+
+@test "waf: the file says why, and that the JSON body processor of Coraza is needed" {
     grep -qi 'json' "$RULES"
     grep -qiE 'body processor' "$RULES"
+    grep -q 'keel-overlay-coraza 0.1.4' "$RULES"
 }
