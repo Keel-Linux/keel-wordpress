@@ -28,6 +28,9 @@ keel-wordpress-19.0 (6) keel; urgency=medium
   * /etc/coreruleset/plugins/keel-wordpress-before.conf: behind Coraza, a
     write with a JSON body to /wp-json/ is not read by the Core Rule Set. The
     block editor could not save a post (rule 941180).
+  * The boot test reads the manifest of the appliance from the assembled
+    rootfs (keel spec apply --root), as keel-lnmp does: the runner of the
+    image gate holds none.
   * wp-cron runs through wp-cli as the web user. The old job requested
     wp-cron.php on the loopback address, where port 80 is the health probe
     of Keel Web and answers 404.

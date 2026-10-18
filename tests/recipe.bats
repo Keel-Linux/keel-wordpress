@@ -137,3 +137,18 @@ code() {
 @test "recipe: the confconsole screen names no web shell the panel does not open" {
     run ! grep -E '12320|Web shell' "$REPO/overlay/etc/confconsole/services.txt"
 }
+
+@test "recipe: the boot test reads the manifest from the assembled rootfs" {
+    # The spec names the appliance, and the host that runs the boot test
+    # (the runner of the image gate) holds no manifest of it: the layer ships
+    # it, so keel spec apply reads it under --root.
+    run python3 - "$REPO/tests/boot-test.sh" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read().replace("\\\n", " ")
+text = re.sub(r"[ \t]+", " ", text)
+assert re.search(r'keel spec apply --spec "[^"]+" --root "\$BT_ROOTFS" ', text), "spec apply has no --root"
+assert re.search(r'keel diff --root "\$BT_ROOTFS" ', text), "diff has no --root"
+PY
+    echo "$output"
+    [ "$status" -eq 0 ]
+}
