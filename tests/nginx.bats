@@ -144,7 +144,7 @@ at() {
 
 # Keel-Linux/keel-web#15. Behind Anubis the front site of Keel Web limits a
 # body to 1 MB before it reaches this route, so a media upload needs a limit
-# in the front too. keel-web 0.3.1 includes /etc/nginx/keel-front.d/*.conf
+# in the front too. keel-web 0.3.2 includes /etc/nginx/keel-front.d/*.conf
 # in the front server, after its own limit.
 @test "front: the layer sets the body limit of the front site in keel-front.d, as the route does" {
     [ -f "$FRONT" ]
@@ -153,7 +153,7 @@ at() {
     grep -qE '^PHP_UPLOAD_MAX_FILESIZE ?[:?]?= ?64M' "$REPO/Makefile"
 }
 
-@test "front: the file says what it needs: keel-web 0.3.1 and keel-overlay-coraza 0.1.4" {
-    grep -q 'keel-web 0.3.1' "$FRONT"
+@test "front: the file says what it needs: keel-web 0.3.2 and keel-overlay-coraza 0.1.4" {
+    grep -q 'keel-web 0.3.2' "$FRONT"
     grep -q 'keel-overlay-coraza 0.1.4' "$FRONT"
 }

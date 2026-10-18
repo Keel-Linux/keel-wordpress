@@ -95,7 +95,7 @@ Behind Anubis and Coraza (the cloud modes) two files of this layer make the
 site work. ``/etc/nginx/keel-front.d/60-keel-wordpress.conf`` sets the body
 limit of the front site of Keel Web to 64 MB, as PHP has it (the front site
 has 1 MB without it, and answers 413 to a media upload). It needs keel-web
-0.3.1. The files of an upload are no argument for Coraza (keel-overlay-coraza
+0.3.2. The files of an upload are no argument for Coraza (keel-overlay-coraza
 0.1.4), so a worker keeps its memory: an upload of 32 MiB costs about 10 MiB.
 And ``/etc/coreruleset/plugins/keel-wordpress-before.conf`` keeps the Core
 Rule Set from reading the content fields of a JSON write to ``/wp-json/``,
