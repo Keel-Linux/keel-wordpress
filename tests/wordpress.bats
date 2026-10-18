@@ -235,6 +235,21 @@ setup() {
     [[ "$output" == *"define('KEEL_WP_FALLBACK_URL', 'https://x.example.org');"* ]]
 }
 
+@test "config_php tells PHP that the request is HTTPS when the scheme it works out is https" {
+    # Behind Anubis the request reaches PHP-FPM from a unix socket with
+    # X-Forwarded-Proto and no HTTPS variable. WordPress sets FORCE_SSL_ADMIN
+    # from an https site URL and then redirects wp-login.php to itself for
+    # ever, because is_ssl() reads $_SERVER['HTTPS'] only.
+    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+    [[ "$output" == *"if (\$keel_wp_scheme === 'https') {"* ]]
+    [[ "$output" == *"\$_SERVER['HTTPS'] = 'on';"* ]]
+    # and it is set before the address that WordPress reads is defined
+    set_line=$(grep -n "_SERVER\['HTTPS'\] = 'on'" <<< "$output" | head -1 | cut -d: -f1)
+    home_line=$(grep -n "define('WP_HOME', \$keel_wp_scheme" <<< "$output" | head -1 | cut -d: -f1)
+    [ -n "$set_line" ] && [ -n "$home_line" ]
+    [ "$set_line" -lt "$home_line" ]
+}
+
 @test "config_php turns off the visitor driven cron and automatic core updates" {
     run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
     [[ "$output" == *"define('DISABLE_WP_CRON', true);"* ]]

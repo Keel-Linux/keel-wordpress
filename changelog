@@ -18,6 +18,16 @@ keel-wordpress-19.0 (6) keel; urgency=medium
     schema is made by the first boot of a primary or a standalone node, not
     by the image, so keel seeds a replica with no flag. The first boot sets
     the permalink structure of a new site to the post name.
+  * wp-config.php sets HTTPS to on when the scheme is https. Behind Anubis
+    the request reaches PHP-FPM with X-Forwarded-Proto and no HTTPS variable,
+    and WordPress redirected wp-login.php to itself for ever (found in the
+    cross-site test, 2026-10-18).
+  * The site is closed (503) until the first boot hook has finished, so the
+    WordPress installer is never offered. Every PHP file of wp-includes is
+    refused, except the compressor of TinyMCE.
+  * /etc/coreruleset/plugins/keel-wordpress-before.conf: behind Coraza, a
+    write with a JSON body to /wp-json/ is not read by the Core Rule Set. The
+    block editor could not save a post (rule 941180).
   * wp-cron runs through wp-cli as the web user. The old job requested
     wp-cron.php on the loopback address, where port 80 is the health probe
     of Keel Web and answers 404.

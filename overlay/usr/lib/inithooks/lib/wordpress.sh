@@ -263,6 +263,11 @@ wordpress_php_string() {
 # whatever address or name reaches it, and the recorded value is only the
 # fallback for WP-CLI and wp-cron, which carry no Host header.
 #
+# HTTPS is set to on when the scheme worked out is https. FORCE_SSL_ADMIN is
+# true for an https site URL, and is_ssl() reads HTTPS only, so behind Anubis
+# (X-Forwarded-Proto, a unix socket, no HTTPS variable) wp-login.php would
+# redirect to itself for ever.
+#
 # DISABLE_WP_CRON with /etc/cron.d/wordpress-cron, so scheduled work does not
 # depend on somebody visiting the site; and automatic core updates off,
 # because core here is root owned and updated by a person (README.rst).
@@ -320,6 +325,11 @@ if (!empty(\$_SERVER['HTTP_HOST'])) {
         || (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO'])
             && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')) {
         \$keel_wp_scheme = 'https';
+    }
+    /* is_ssl() of WordPress reads HTTPS and nothing else. Behind Anubis the
+       request comes from a unix socket with X-Forwarded-Proto, so say it. */
+    if (\$keel_wp_scheme === 'https') {
+        \$_SERVER['HTTPS'] = 'on';
     }
     define('WP_HOME', \$keel_wp_scheme . '://' . \$_SERVER['HTTP_HOST']);
 } else {
