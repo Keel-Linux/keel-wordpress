@@ -1,3 +1,41 @@
+keel-wordpress-19.0 (6) keel; urgency=medium
+
+  * WordPress is a layer on lnmp and is served by nginx and PHP-FPM
+    (handbook decision 0059). Apache, mod_php, mod_security2, mod_evasive and
+    Webmin's Apache module are gone, and so is the staging archive that the
+    build copied: the project packages come from the Keel archive, as in
+    lnmp.
+  * The site is /etc/nginx/keel-default.d/60-keel-wordpress.conf, in the
+    include directory of keel-web 0.3.0, so it answers in the simple mode
+    and behind Anubis. Pretty permalinks use try_files. It refuses
+    wp-config.php, PHP in the directories that the web user writes, the PHP
+    files of wp-includes, hidden files, and log and dump files. xmlrpc.php is
+    reachable, as it was.
+  * The appliance has a manifest, wordpress.yaml (base lnmp), with the
+    options of its first boot hook. An instance description names the
+    appliance: appliance.name: wordpress, and app.options.db_user: wordpress.
+  * A replica gets wp-config.php and nothing in the database. The WordPress
+    schema is made by the first boot of a primary or a standalone node, not
+    by the image, so keel seeds a replica with no flag. The first boot sets
+    the permalink structure of a new site to the post name.
+  * wp-config.php sets HTTPS to on when the scheme is https. Behind Anubis
+    the request reaches PHP-FPM with X-Forwarded-Proto and no HTTPS variable,
+    and WordPress redirected wp-login.php to itself for ever (found in the
+    cross-site test, 2026-10-18).
+  * The site is closed (503) until the first boot hook has finished, so the
+    WordPress installer is never offered. Every PHP file of wp-includes is
+    refused, except the compressor of TinyMCE.
+  * /etc/coreruleset/plugins/keel-wordpress-before.conf: behind Coraza, a
+    write with a JSON body to /wp-json/ is not read by the Core Rule Set. The
+    block editor could not save a post (rule 941180).
+  * wp-cron runs through wp-cli as the web user. The old job requested
+    wp-cron.php on the loopback address, where port 80 is the health probe
+    of Keel Web and answers 404.
+  * The panel opens 22, 80, 443 and 12321, as Core does: the web shell is not
+    in Core any more.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 04:00:00 +0000
+
 turnkey-wordpress-19.0 (5) turnkey; urgency=medium
 
   * bin/wordpress.py draws its password boxes on the terminal.

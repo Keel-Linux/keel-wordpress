@@ -9,7 +9,7 @@ curl_args=(-kfsS --resolve localhost:443:127.0.0.1)
 hook=/usr/lib/inithooks/bin/wordpress.py
 mkdir -p "$work"
 
-systemctl --quiet is-active apache2.service mariadb.service multi-user.target
+systemctl --quiet is-active nginx.service php8.4-fpm.service mariadb.service multi-user.target
 grep -q '\[40wordpress\] successfully completed' /var/log/inithooks.log
 
 # Exercise validation through the real firstboot hook and restore the expected URL.
@@ -86,8 +86,8 @@ for dir in uploads cache upgrade plugins themes; do
     runuser -u www-data -- rm "$marker"
 done
 
-systemctl restart mariadb.service apache2.service
-systemctl --quiet is-active mariadb.service apache2.service
+systemctl restart mariadb.service php8.4-fpm.service nginx.service
+systemctl --quiet is-active mariadb.service php8.4-fpm.service nginx.service
 test "$(keel-wp post get "$post_id" --field=post_content)" = \
     qa-wordpress-persistence
 curl "${curl_args[@]}" -b "$work/cookies" "$admin_url" \

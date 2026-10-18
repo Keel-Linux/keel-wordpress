@@ -235,6 +235,21 @@ setup() {
     [[ "$output" == *"define('KEEL_WP_FALLBACK_URL', 'https://x.example.org');"* ]]
 }
 
+@test "config_php tells PHP that the request is HTTPS when the scheme it works out is https" {
+    # Behind Anubis the request reaches PHP-FPM from a unix socket with
+    # X-Forwarded-Proto and no HTTPS variable. WordPress sets FORCE_SSL_ADMIN
+    # from an https site URL and then redirects wp-login.php to itself for
+    # ever, because is_ssl() reads $_SERVER['HTTPS'] only.
+    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+    [[ "$output" == *"if (\$keel_wp_scheme === 'https') {"* ]]
+    [[ "$output" == *"\$_SERVER['HTTPS'] = 'on';"* ]]
+    # and it is set before the address that WordPress reads is defined
+    set_line=$(grep -n "_SERVER\['HTTPS'\] = 'on'" <<< "$output" | head -1 | cut -d: -f1)
+    home_line=$(grep -n "define('WP_HOME', \$keel_wp_scheme" <<< "$output" | head -1 | cut -d: -f1)
+    [ -n "$set_line" ] && [ -n "$home_line" ]
+    [ "$set_line" -lt "$home_line" ]
+}
+
 @test "config_php turns off the visitor driven cron and automatic core updates" {
     run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
     [[ "$output" == *"define('DISABLE_WP_CRON', true);"* ]]
@@ -314,4 +329,107 @@ setup() {
     [ "$status" -ne 0 ]
     run wordpress_install_args "https://x" "T" admin ""
     [ "$status" -ne 0 ]
+}
+
+# --- the role of the node, the schema and the permalinks ----------------------
+
+@test "spec_role reads database.server.role from the spec" {
+    printf 'database:\n  server:\n    role: replica\n' > "$BATS_TEST_TMPDIR/spec.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/spec.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "replica" ]
+}
+
+@test "spec_role is empty for a spec with no database section" {
+    printf 'instance:\n  hostname: wordpress\n' > "$BATS_TEST_TMPDIR/spec.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/spec.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "spec_role is empty for a spec that is missing: a machine with no spec has no pair" {
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/none.yaml"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "spec_role fails for a spec that exists and cannot be read as a mapping" {
+    # A role that cannot be read must not become "no role": a replica would
+    # then make a schema and a site of its own.
+    printf 'a: [unclosed\n' > "$BATS_TEST_TMPDIR/bad.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/bad.yaml"
+    [ "$status" -ne 0 ]
+    printf -- '- a\n- b\n' > "$BATS_TEST_TMPDIR/list.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/list.yaml"
+    [ "$status" -ne 0 ]
+    printf 'database:\n  - server\n' > "$BATS_TEST_TMPDIR/db.yaml"
+    run wordpress_spec_role "$BATS_TEST_TMPDIR/db.yaml"
+    [ "$status" -ne 0 ]
+}
+
+@test "is_replica is true for the role replica and for a server that is read only" {
+    run wordpress_is_replica replica 0
+    [ "$status" -eq 0 ]
+    run wordpress_is_replica "" 1
+    [ "$status" -eq 0 ]
+    run wordpress_is_replica primary ON
+    [ "$status" -eq 0 ]
+}
+
+@test "is_replica is false for a primary, a standalone server and a writable server" {
+    run wordpress_is_replica primary 0
+    [ "$status" -ne 0 ]
+    run wordpress_is_replica "" 0
+    [ "$status" -ne 0 ]
+    run wordpress_is_replica "" OFF
+    [ "$status" -ne 0 ]
+}
+
+@test "create_database_sql makes the schema with the character set of WordPress" {
+    run wordpress_create_database_sql wordpress
+    [ "$status" -eq 0 ]
+    [ "$output" = 'CREATE DATABASE IF NOT EXISTS `wordpress` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' ]
+}
+
+@test "create_database_sql refuses a name that would need quoting" {
+    run wordpress_create_database_sql 'word press'
+    [ "$status" -ne 0 ]
+    run wordpress_create_database_sql 'x`; DROP DATABASE mysql; --'
+    [ "$status" -ne 0 ]
+    run wordpress_create_database_sql ""
+    [ "$status" -ne 0 ]
+}
+
+@test "missing_values does not ask a replica for the administrator password" {
+    run wordpress_missing_values "" "db" replica
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    run wordpress_missing_values "" "" replica
+    [ "$output" = "DB_PASS" ]
+}
+
+@test "the permalink structure is the post name" {
+    [ "$WORDPRESS_PERMALINKS" = "/%postname%/" ]
+}
+
+@test "grant_sql grants the account its schema on the three hosts" {
+    run wordpress_grant_sql site wp_user
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "${lines[0]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'localhost';" ]
+    [ "${lines[1]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'::1';" ]
+    [ "${lines[2]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'127.0.0.1';" ]
+}
+
+@test "grant_sql refuses a name or an account that would need quoting" {
+    run wordpress_grant_sql 'a b' wp_user
+    [ "$status" -ne 0 ]
+    run wordpress_grant_sql site "x'; DROP USER y; --"
+    [ "$status" -ne 0 ]
+    run wordpress_grant_sql "" wp_user
+    [ "$status" -ne 0 ]
+}
+
+@test "the ready marker is a file beside the WordPress tree, not in it" {
+    [[ "$WORDPRESS_READY" == /var/www/.keel-wordpress-ready ]]
 }

@@ -1,197 +1,105 @@
 #!/usr/bin/env bats
-# conf.d/zz-project-packages: what the build installed has to be what the
-# project archive offers, and no version is written down anywhere. The script
-# runs for real against a scratch tree, with dpkg, dpkg-query and apt-cache as
-# PATH stubs driven by fixture files. No root, no chroot, no apt.
+# bin/keel-project-packages, with dpkg-query and apt-cache replaced by stubs
+# that answer what apt 3 prints on trixie. The policy fixtures are the shape
+# measured on the build host on 2026-10-07.
+
+bats_require_minimum_version 1.5.0
 
 setup() {
-    ROOT="$BATS_TEST_DIRNAME/.."
-    SCRIPT="$ROOT/conf.d/zz-project-packages"
-    scratch="$BATS_TEST_TMPDIR/packages"
-    ARCH=amd64
-    DIST=trixie-staging
-
-    export KEEL_APT_ROOT="$scratch/srv/keel-apt"
-    export KEEL_STAGING_LIST="$scratch/apt/sources.list.d/keel-staging.list"
-    export KEEL_STAGING_KEYRING="$scratch/apt/keyrings/keel-staging-keyring.asc"
-    export KEEL_SOURCES="$scratch/apt/sources.list.d/keel.sources"
-    export KEEL_APT_LISTS="$scratch/apt/lists"
-    export FIXTURES="$scratch/fixtures"
-
-    INDEX="$KEEL_APT_ROOT/repo/dists/$DIST/main/binary-$ARCH/Packages"
-    mkdir -p "$(dirname "$INDEX")" "$(dirname "$KEEL_STAGING_LIST")" \
-        "$(dirname "$KEEL_STAGING_KEYRING")" \
-        "$KEEL_APT_LISTS" "$FIXTURES" "$scratch/bin"
-    touch "$KEEL_APT_LISTS/keel_Packages"
-
-    echo "deb [signed-by=$KEEL_STAGING_KEYRING] file://$KEEL_APT_ROOT/repo $DIST main" \
-        > "$KEEL_STAGING_LIST"
-    printf 'not a key, and this script never reads one\n' > "$KEEL_STAGING_KEYRING"
-    printf 'Types: deb\nURIs: https://apt.keellinux.org\nEnabled: no\n' > "$KEEL_SOURCES"
-
-    offer inithooks 2.3.6+keel4
-    offer confconsole 2.2.3+keel2
-    offer keel 0.2.1
-    for package in inithooks confconsole keel; do
-        candidate "$package" "$(archive_version "$package")"
-        from_project_archive "$package" "$(archive_version "$package")"
-        installed "$package" "$(archive_version "$package")" "install ok installed"
-    done
-
-    stub dpkg '[ "$1" = --print-architecture ] && echo amd64'
-    stub apt-cache 'cat "$FIXTURES/$1.$2" 2>/dev/null; exit 0'
-    stub dpkg-query '
-        case "$3" in
-            *Version*) field=version ;;
-            *) field=status ;;
-        esac
-        [ -f "$FIXTURES/installed.$4" ] || exit 1
-        sed -n "s/^$field=//p" "$FIXTURES/installed.$4"
-    '
-    PATH="$scratch/bin:$PATH"
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    CHECK="$REPO/bin/keel-project-packages"
+    STUBS="$BATS_TEST_TMPDIR/stubs"
+    mkdir -p "$STUBS"
+    export DPKG_QUERY="$STUBS/dpkg-query" APT_CACHE="$STUBS/apt-cache"
+    export KEEL_APT_TRACK=testing
+    installed inithooks 2.3.6+keel23
+    installed confconsole 2.2.3+keel15
+    installed keel 0.19.0
+    policy inithooks 2.3.6+keel23 2.3.6+keel23 trixie-testing 2.3.6+keel5 trixie
+    policy confconsole 2.2.3+keel15 2.2.3+keel15 trixie-testing 2.2.3+keel2 trixie
+    policy keel 0.19.0 0.19.0 trixie-testing 0.3.5 trixie
+    write_stubs
 }
 
-stub() {
-    printf '#!/bin/sh\n%s\n' "$2" > "$scratch/bin/$1"
-    chmod +x "$scratch/bin/$1"
+# installed PACKAGE VERSION: what dpkg-query reports for it
+installed() {
+    printf 'install ok installed %s\n' "$2" > "$STUBS/$1.status"
 }
 
-# the package index of the archive: one stanza per offered version
-offer() {
-    printf 'Package: %s\nVersion: %s\nArchitecture: all\n\n' "$1" "$2" >> "$INDEX"
+# policy PACKAGE INSTALLED CANDIDATE SUITE OLD OLDSUITE: apt-cache policy
+# output, the candidate in SUITE and an older version in OLDSUITE
+policy() {
+    cat > "$STUBS/$1.policy" <<EOF
+$1:
+  Installed: $2
+  Candidate: $3
+  Version table:
+ *** $3 990
+        990 https://archive.keellinux.org $4/main amd64 Packages
+        100 /var/lib/dpkg/status
+     $5 990
+        990 https://archive.keellinux.org $6/main amd64 Packages
+EOF
 }
 
-archive_version() {
-    awk -v want="$1" '$1 == "Package:" { p = $2 } $1 == "Version:" && p == want { print $2 }' "$INDEX"
+write_stubs() {
+    printf '#!/bin/bash\nf="%s/${!#}.status"\n[ -f "$f" ] || exit 1\ncat "$f"\n' "$STUBS" > "$DPKG_QUERY"
+    printf '#!/bin/bash\ncat "%s/$2.policy"\n' "$STUBS" > "$APT_CACHE"
+    chmod +x "$DPKG_QUERY" "$APT_CACHE"
 }
 
-candidate() { printf '%s:\n  Installed: %s\n  Candidate: %s\n' "$1" "$2" "$2" > "$FIXTURES/policy.$1"; }
-
-from_project_archive() {
-    printf ' %s | %s | file:%s/repo %s/main amd64 Packages\n' \
-        "$1" "$2" "$KEEL_APT_ROOT" "$DIST" > "$FIXTURES/madison.$1"
-}
-
-from_upstream() {
-    printf ' %s | %s | http://archive.turnkeylinux.org/debian trixie/main amd64 Packages\n' \
-        "$1" "$2" > "$FIXTURES/madison.$1"
-}
-
-installed() { printf 'version=%s\nstatus=%s\n' "$2" "$3" > "$FIXTURES/installed.$1"; }
-
-@test "the three project packages at the versions the archive offers pass" {
-    run "$SCRIPT"
+@test "the three project packages pass when each is the testing candidate from the Keel archive" {
+    run "$CHECK"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"inithooks 2.3.6+keel4, the candidate of the project archive"* ]]
-    [[ "$output" == *"confconsole 2.2.3+keel2, the candidate of the project archive"* ]]
-    [[ "$output" == *"keel 0.2.1, the candidate of the project archive"* ]]
+    [[ "$output" == *"inithooks 2.3.6+keel23 from archive.keellinux.org trixie-testing"* ]]
+    [[ "$output" == *"confconsole 2.2.3+keel15 from archive.keellinux.org trixie-testing"* ]]
+    [[ "$output" == *"keel 0.19.0 from archive.keellinux.org trixie-testing"* ]]
 }
 
-@test "the build time package source is gone once the packages check out" {
-    run "$SCRIPT"
+@test "a package left below its candidate fails, which is what a stale or downgrading source leaves" {
+    installed inithooks 2.3.6+keel5
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"inithooks is 2.3.6+keel5, the archive offers 2.3.6+keel23"* ]]
+}
+
+@test "a candidate from another source than the Keel archive's suite fails" {
+    cat > "$STUBS/keel.policy" <<'EOF'
+keel:
+  Installed: 0.19.0
+  Candidate: 0.19.0
+  Version table:
+ *** 0.19.0 1001
+       1001 file:/srv/keel-apt/repo trixie-staging/main amd64 Packages
+        100 /var/lib/dpkg/status
+EOF
+    run "$CHECK" keel
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"keel 0.19.0 is not from https://archive.keellinux.org trixie-testing"* ]]
+}
+
+@test "the stable track wants trixie, so a testing-only candidate fails there" {
+    run env KEEL_APT_TRACK=stable "$CHECK" keel
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not from https://archive.keellinux.org trixie"* ]]
+    policy keel 0.19.0 0.19.0 trixie 0.3.5 trixie-testing
+    run env KEEL_APT_TRACK=stable "$CHECK" keel
     [ "$status" -eq 0 ]
-    [ ! -e "$KEEL_APT_ROOT" ]
-    [ ! -e "$KEEL_STAGING_LIST" ]
-    [ -z "$(ls -A "$KEEL_APT_LISTS")" ]
-    [ -f "$KEEL_SOURCES" ]
-}
-
-@test "the keyring that verified the staging archive is gone too" {
-    # The staging key signs whatever the build host produced, so it must not
-    # reach an installed appliance (tracker#7).
-    run "$SCRIPT"
+    unset KEEL_APT_TRACK
+    run "$CHECK" keel
     [ "$status" -eq 0 ]
-    [ ! -e "$KEEL_STAGING_KEYRING" ]
 }
 
-@test "the recipe names no version: a new publication is simply the new candidate" {
-    rm "$INDEX"
-    offer inithooks 2.3.7+keel9
-    offer confconsole 2.3.0+keel3
-    offer keel 0.3.0
-    for package in inithooks confconsole keel; do
-        candidate "$package" "$(archive_version "$package")"
-        from_project_archive "$package" "$(archive_version "$package")"
-        installed "$package" "$(archive_version "$package")" "install ok installed"
-    done
-    run "$SCRIPT"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"inithooks 2.3.7+keel9"* ]]
-    [[ "$output" == *"keel 0.3.0"* ]]
-}
-
-@test "yesterday's package with today's archive fails" {
-    installed inithooks 2.3.6+keel1 "install ok installed"
-    run "$SCRIPT"
+@test "a package that is not installed fails, and the others are still checked" {
+    rm "$STUBS/confconsole.status"
+    run "$CHECK"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"inithooks 2.3.6+keel1 is installed and the project archive offers 2.3.6+keel4"* ]]
-    [[ "$output" == *"stale index"* ]]
+    [[ "$output" == *"confconsole is not installed"* ]]
+    [[ "$output" == *"keel 0.19.0 from archive.keellinux.org trixie-testing"* ]]
 }
 
-@test "an index that is not the archive the build read fails" {
-    candidate inithooks 2.3.6+keel1
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"apt would install '2.3.6+keel1' and the project archive offers '2.3.6+keel4'"* ]]
-}
-
-@test "an upstream build of the same version fails" {
-    from_upstream confconsole 2.2.3+keel2
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"confconsole 2.2.3+keel2 does not come from"* ]]
-    [[ "$output" == *"it is an upstream build"* ]]
-}
-
-@test "a package the archive does not offer fails" {
-    rm "$INDEX"
-    offer inithooks 2.3.6+keel4
-    offer confconsole 2.2.3+keel2
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"keel:"* ]]
-    [[ "$output" == *"offers 0 versions (none), expected one"* ]]
-}
-
-@test "an archive that offers two versions of a package fails" {
-    offer keel 0.2.2
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"offers 2 versions (0.2.1 0.2.2), expected one"* ]]
-}
-
-@test "a package that is not installed fails" {
-    rm "$FIXTURES/installed.keel"
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"keel is not installed"* ]]
-}
-
-@test "a half configured package fails even at the right version" {
-    installed confconsole 2.2.3+keel2 "install ok unpacked"
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"confconsole is 'install ok unpacked', not 'install ok installed'"* ]]
-}
-
-@test "a build with no project archive in its source list fails" {
-    echo "# nothing here" > "$KEEL_STAGING_LIST"
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"no file: source in $KEEL_STAGING_LIST"* ]]
-}
-
-@test "a source list that names a distribution the archive has not got fails" {
-    echo "deb [signed-by=$KEEL_STAGING_KEYRING] file://$KEEL_APT_ROOT/repo trixie-nowhere main" \
-        > "$KEEL_STAGING_LIST"
-    run "$SCRIPT"
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"no package index at"* ]]
-    [[ "$output" == *"trixie-nowhere"* ]]
-}
-
-@test "the future signed repository has to stay in place, disabled" {
-    printf 'Types: deb\nURIs: https://apt.keellinux.org\nEnabled: yes\n' > "$KEEL_SOURCES"
-    run "$SCRIPT"
-    [ "$status" -ne 0 ]
+@test "an unknown track stops the check" {
+    run env KEEL_APT_TRACK=nightly "$CHECK"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"must be 'stable' or 'testing', got 'nightly'"* ]]
 }

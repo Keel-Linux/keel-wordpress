@@ -44,7 +44,10 @@ BT_ARCHIVE_URI="https://archive.keellinux.org"
 BT_ARCHIVE_HOST="${BT_ARCHIVE_URI#*://}"
 BT_ARCHIVE_HOST="${BT_ARCHIVE_HOST%%/*}"
 BT_ARCHIVE_SUITE="trixie"
-BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.gpg"
+# Core ships two sources of the archive, the stable suite and the testing
+# one, both signed by the keyring of the keel-archive-keyring package.
+BT_ARCHIVE_SUITES="trixie trixie-testing"
+BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.asc"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 # What the build used to reach the project's own packages and what must not be
 # in the finished image: the copy of the staging archive, the source entry that
@@ -61,7 +64,7 @@ etc/apt/keyrings/keel-staging-keyring.asc"
 # has to come from our archive, at the priority the appliance's own pin file
 # sets.
 BT_POLICY_PACKAGE="inithooks"
-BT_ARCHIVE_PIN=1001
+BT_ARCHIVE_PIN=990
 # Where this library and the awk programs beside it live.
 BT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # And the package path itself, in two steps, neither of which needs a version
@@ -296,7 +299,7 @@ bt_lxc_config() {
     #
     # The apparmor pair is not decoration. Under the stock container profile a
     # unit that asks systemd for a mount namespace is refused, and both
-    # mariadb.service and apache2.service ask: they fail with
+    # mariadb.service and nginx.service ask: they fail with
     # status=226/NAMESPACE, so the first boot never reaches the database and
     # the site never starts. A generated profile with nesting allowed is what
     # a container running systemd needs, and it is what the appliance
@@ -437,6 +440,34 @@ bt_installer_verdict() {
     echo "boot-test: the installer is not offered and the page is a WordPress site"
 }
 
+bt_status_verdict() {
+    # bt_status_verdict WHAT WANT GOT: a route of the site answered the status
+    # it must. The hardening of the site is proved by what a request gets
+    # (403 for wp-config.php and for PHP in uploads), never by reading the
+    # nginx file that is supposed to say so.
+    local what=$1 want=$2 got=${3-}
+    if [ "$got" != "$want" ]; then
+        echo "boot-test: $what answered $got, not $want" >&2
+        return 1
+    fi
+    echo "boot-test: $what answered $want"
+}
+
+bt_no_apache_verdict() {
+    # bt_no_apache_verdict ROOTFS: nothing of Apache is in the finished image
+    # (handbook decision 0059). The server binary and its configuration are
+    # what a reader of the tree would find first.
+    local rootfs=$1 path found=0
+    for path in usr/sbin/apache2 etc/apache2/apache2.conf; do
+        if [ -e "$rootfs/$path" ]; then
+            echo "boot-test: the image carries /$path: Keel retired Apache" >&2
+            found=1
+        fi
+    done
+    [ "$found" -eq 0 ] || return 1
+    echo "boot-test: no Apache in the image"
+}
+
 bt_config_verdict() {
     # bt_config_verdict FILE APP_DB_USER DB_NAME: wp-config.php names the
     # local database and this appliance's account, and carries none of the
@@ -548,8 +579,9 @@ bt_build_leftovers_verdict() {
 }
 
 bt_sources_verdict() {
-    # bt_sources_verdict FILE: the appliance's own APT source, as it ships:
-    # enabled, the signed distribution, our keyring, and never a staging one.
+    # bt_sources_verdict FILE: the appliance's own APT sources, as Core ships
+    # them: each stanza enabled, a signed suite of ours, our keyring, and
+    # never a staging one.
     local sources=$1 field value
     while read -r field value; do
         case "$field" in
@@ -557,8 +589,10 @@ bt_sources_verdict() {
                 echo "boot-test: $sources is not enabled" >&2; return 1; } ;;
             URIs:) [ "$value" = "$BT_ARCHIVE_URI" ] || {
                 echo "boot-test: $sources names '$value', not $BT_ARCHIVE_URI" >&2; return 1; } ;;
-            Suites:) [ "$value" = "$BT_ARCHIVE_SUITE" ] || {
-                echo "boot-test: $sources names the suite '$value', not $BT_ARCHIVE_SUITE" >&2; return 1; } ;;
+            Suites:) case " $BT_ARCHIVE_SUITES " in
+                *" $value "*) ;;
+                *) echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1 ;;
+                esac ;;
             Signed-By:) [ "$value" = "$BT_ARCHIVE_KEYRING" ] || {
                 echo "boot-test: $sources is signed by '$value', not $BT_ARCHIVE_KEYRING" >&2; return 1; } ;;
         esac

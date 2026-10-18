@@ -1,0 +1,95 @@
+# Example instance spec of Keel WordPress, the primary of a replicated pair in
+# a cloud simple installation (keel docs/spec.md and docs/replication.md;
+# handbook decisions 0047, 0049 and 0059): database.server with
+# appliance.vip, as on the lnmp layer. The replica has the same spec with
+# role: replica, its own hostname and the same VIP, and it needs no
+# secrets.app_password: the site and its administrator come with the copy of
+# the primary. Both nodes carry the same secrets.db_password. The pair needs
+# the mesh first (keel mesh create, keel mesh invite, keel mesh join) and the
+# pair record (keel vip pair). Overlays are every overlay of the chain:
+# Core's five and Web's three.
+version: 1
+
+instance:
+  hostname: wordpress-a
+  fqdn: wordpress-a.example.org
+
+network:
+  managed_by: host
+  interfaces:
+    eth0:
+      ipv6:
+        method: auto
+  # the mesh: this node's side of the WireGuard overlay; keel mesh join
+  # writes it, with the other member of the pair as a peer
+  overlay:
+    wireguard:
+      interface: wg0
+      address: fd2a:9c41:7e03::1/64
+      listen_port: 51820
+      peers:
+        - public_key: 0niNkgzhpbKmTSrWCzukb6jaYogKZkGhW+xWlh52Mh8=
+          endpoint: "[2001:db8:2::20]:51820"
+          allowed_ips: [fd2a:9c41:7e03::2/128]
+          persistent_keepalive: 25
+
+tls:
+  acme:
+    enabled: false
+
+appliance:
+  name: wordpress
+  # the pair's VIP: one /128 of the overlay's VIP range, the same on both
+  # nodes (keel docs/vip.md)
+  vip: fd2a:9c41:7e03::ffff:1
+installation:
+  mode: cloud_simple
+overlays:
+  installer: enabled
+  wireguard: enabled
+  etcd: disabled
+  crowdsec: enabled
+  vip: enabled
+  nginx: enabled
+  coraza: enabled
+  anubis: enabled
+
+database:
+  server:
+    engine: mariadb
+    # the role chosen at installation; after the first claim the VIP's
+    # holder is the primary (0049)
+    role: primary
+    # the replica replicates from this node's overlay address, and keel
+    # binds what is declared here plus the VIP (keel docs/replication.md)
+    listen:
+      - "fd2a:9c41:7e03::1"
+      - "::1"
+      - 127.0.0.1
+
+secrets:
+  root_password:
+    file: /etc/keel/secrets/root_password
+  db_password:
+    file: /etc/keel/secrets/db_password
+  app_password:
+    file: /etc/keel/secrets/app_password
+
+app:
+  email: admin@example.org
+  domain: wordpress.example.org
+  options:
+    admin_user: admin
+    site_title: WordPress
+    db_user: wordpress
+    db_name: wordpress
+    db_prefix: wp_
+
+hub:
+  api_key: skip
+
+security:
+  alerts: skip
+  updates_at_first_boot: skip
+
+first_login_wizard: false

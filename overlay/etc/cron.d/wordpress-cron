@@ -1,7 +1,11 @@
 # WordPress runs its scheduled work from cron rather than on page loads:
-# wp-config.php sets DISABLE_WP_CRON. The request goes to the loopback over
-# IPv6 first, which is where Apache listens (::1 and 127.0.0.1 are both up),
-# and the literal address is used because on Debian "localhost" is an IPv4
-# name only (docs/traps.md of the keel repository).
+# wp-config.php sets DISABLE_WP_CRON. wp-cli runs the events that are due, as
+# the web user, in the PHP of the command line. The job does not request
+# wp-cron.php: the loopback addresses on port 80 are the health probe of
+# Keel Web, which answers 404 to everything but /keel-health.
+#
+# A replica is read-only and every event would fail to record that it ran,
+# so the job does nothing while the server says it is read-only. If the
+# server cannot be asked, the job runs and wp-cli reports the real error.
 MAILTO=root
-*/5 * * * * www-data /usr/bin/curl -6 -sS -o /dev/null -A 'Keel-Linux-cron' 'http://[::1]/wp-cron.php' || /usr/bin/curl -4 -sS -o /dev/null -A 'Keel-Linux-cron' 'http://127.0.0.1/wp-cron.php'
+*/5 * * * * www-data [ "$(/usr/bin/mysql --batch --skip-column-names --execute='SELECT @@global.read_only' 2>/dev/null)" != 1 ] && /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now --quiet

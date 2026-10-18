@@ -53,10 +53,10 @@ jobs:
     uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
     with:
       appliance: wordpress
-      # The delta is built on the mariadb layer; the workflow checks this
+      # The delta is built on the lnmp layer (decision 0059); the workflow checks this
       # against the parent the published manifest records. It becomes
-      # apache-php when that layer lands, and the layer is rebuilt then.
-      parent: mariadb
+      # published manifest records.
+      parent: lnmp
       timeout: 60
       # No layer of this appliance is on the mirror yet (decision 0059: it
       # moves to the current stack first). Without this line the job fails
