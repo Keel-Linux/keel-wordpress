@@ -526,6 +526,21 @@ EOF
     [[ "$output" == *"is enabled and verified with"* ]]
 }
 
+@test "sources_verdict accepts the testing suite signed by the testing key" {
+    _sources https://archive.keellinux.org trixie-testing yes /usr/share/keyrings/keel-testing-keyring.gpg
+    run bt_sources_verdict "$S/keel.sources"
+    [ "$status" -eq 0 ]
+}
+
+@test "sources_verdict accepts the keyring in either of the two formats that Core ships" {
+    _sources https://archive.keellinux.org trixie yes /usr/share/keyrings/keel-archive-keyring.gpg
+    run bt_sources_verdict "$S/keel.sources"
+    [ "$status" -eq 0 ]
+    _sources https://archive.keellinux.org trixie yes /usr/share/keyrings/keel-archive-keyring.asc
+    run bt_sources_verdict "$S/keel.sources"
+    [ "$status" -eq 0 ]
+}
+
 @test "sources_verdict passes on the two sources that Core ships, stable and testing" {
     _sources
     printf '\n' >> "$S/keel.sources"
