@@ -12,6 +12,20 @@ base: lnmp
 # to wordpress, the account that the layer ships with no password and that
 # firstboot.d/35mysqlpass gives the declared one. The administrator's
 # password is secrets.app_password, a name of the spec itself.
+# state: the directories WordPress writes at run time (0050's amendment of
+# 2026-10-20, item 2, and its note of 2026-10-24: uploads, themes, plugins
+# and languages — without languages a replica serves the site untranslated
+# after a flip). On a database pair one Syncthing folder replicates each,
+# send-only on the primary and receive-only on the replica. cache, upgrade
+# and upgrade-temp-backup are inside no replicated path, so they replicate
+# nowhere: rule 23 of docs/manifest-v1.md wants an exclude inside a
+# replicated path, and none is declared here.
+state:
+  replicate:
+    - /var/www/wordpress/wp-content/uploads
+    - /var/www/wordpress/wp-content/themes
+    - /var/www/wordpress/wp-content/plugins
+    - /var/www/wordpress/wp-content/languages
 options:
   - name: admin_user
     type: string

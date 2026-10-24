@@ -49,6 +49,14 @@ print(eval(sys.argv[2]))' "$MANIFEST" "$1"
     [ "$(manifest 'm.get("overlays")')" = None ]
 }
 
+@test "manifest: the state it replicates is the directories WordPress writes at run time (0050, languages of the 2026-10-24 note)" {
+    [ "$(manifest 'm["state"]["replicate"]')" = "['/var/www/wordpress/wp-content/uploads', '/var/www/wordpress/wp-content/themes', '/var/www/wordpress/wp-content/plugins', '/var/www/wordpress/wp-content/languages']" ]
+}
+
+@test "manifest: cache, upgrade and upgrade-temp-backup are inside no replicated path, so no exclude is declared" {
+    [ "$(manifest 'm["state"].get("exclude")')" = None ]
+}
+
 @test "manifest: no tabs, no CRLF" {
     run ! grep -q $'[\t\r]' "$MANIFEST"
 }

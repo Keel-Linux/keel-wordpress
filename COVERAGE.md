@@ -18,12 +18,12 @@ acceptance test of a recipe, docs/org-plan.md section 1).
 | `overlay/usr/lib/inithooks/bin/wordpress.py` | `tests/dialog.bats` (3 tests) | not measured (kcov measures the shell) | dialog wrapper, run as the hook runs it inside a pseudo terminal: the answers reach the hook and the boxes are drawn on the terminal |
 | `overlay/etc/nginx/keel-default.d/60-keel-wordpress.conf` | `tests/nginx.bats` (21 tests) | not measured (nginx configuration) | the refusals, the order of the locations, the PHP handler and the catch-all; `conf.d/main` runs `nginx -t` on it at the build, and the boot test asks each route |
 | `overlay/etc/coreruleset/plugins/keel-wordpress-before.conf` | `tests/waf.bats` (5 tests) | not measured (Core Rule Set configuration) | the one exclusion of the REST API, read by the rule set before its own rules; the cross-site test saves a post through it |
-| `overlay/usr/share/keel/appliances/wordpress.yaml` | `tests/manifest.bats` (11 tests) | not measured | keel validates it and the three example specs when `KEEL_SRC` names a checkout of keel |
+| `overlay/usr/share/keel/appliances/wordpress.yaml` | `tests/manifest.bats` (13 tests) | not measured | keel validates it and the three example specs when `KEEL_SRC` names a checkout of keel |
 | `overlay/usr/lib/inithooks/lib/*.php` | the boot test | integration only | two PHP files `wp eval-file` runs; `conf.d/main` has PHP lint them |
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the seven measured shell files: all above **97 percent**, 276 bats
+Total over the seven measured shell files: all above **97 percent**, 278 bats
 tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`,
 which the workflow sets to **97**, the lowest measured file. It is only ever
 raised (decision 0006).
