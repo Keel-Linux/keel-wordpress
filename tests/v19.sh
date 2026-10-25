@@ -80,7 +80,7 @@ test "$(stat -c '%U:%G %a' /var/www/wordpress/wp-config.php)" = \
     'root:www-data 640'
 runuser -u www-data -- test ! -w /var/www/wordpress/index.php
 runuser -u www-data -- test ! -w /var/www/wordpress/wp-config.php
-for dir in uploads cache upgrade plugins themes; do
+for dir in uploads cache upgrade plugins themes languages; do
     marker=/var/www/wordpress/wp-content/$dir/.tkl-v19-write-test
     runuser -u www-data -- touch "$marker"
     runuser -u www-data -- rm "$marker"

@@ -133,7 +133,9 @@ service mysql stop
 chown -R root:root "$WPROOT"
 find "$WPROOT" -type d -exec chmod 0755 {} +
 find "$WPROOT" -type f -exec chmod 0644 {} +
-for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes; do
+# languages is a replicated path of the manifest (keel-wordpress#30): core
+# does not ship it, so it is made here.
+for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes languages; do
     install -d -o "$WEB_USER" -g "$WEB_USER" -m 0755 "$WPROOT/wp-content/$runtime_dir"
     chown -R "$WEB_USER:$WEB_USER" "$WPROOT/wp-content/$runtime_dir"
 done
