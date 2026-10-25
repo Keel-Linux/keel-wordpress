@@ -542,8 +542,34 @@ _replica_spec() {
     grep -q "^chown -R $WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER $WPROOT/wp-content/uploads\$" "$CALLS"
 }
 
+@test "a node that lacks a replicated directory gets it, owned by the web user (keel-wordpress#30)" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    for dir in uploads themes plugins languages; do
+        [ -d "$WPROOT/wp-content/$dir" ]
+        grep -q "^chown $WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER $WPROOT/wp-content/$dir\$" "$CALLS"
+    done
+}
+
+@test "a replica gets the replicated directories too, before the web server starts" {
+    _replica_spec
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ -d "$WPROOT/wp-content/languages" ]
+    grep -q "^chown $WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER $WPROOT/wp-content/languages\$" "$CALLS"
+}
+
+@test "a replicated directory that exists is left alone" {
+    mkdir -p "$WPROOT/wp-content/languages"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    run grep -c "wp-content/languages" "$CALLS"
+    [ "$output" = 0 ]
+}
+
 @test "a replica does not touch the uploads tree" {
     _replica_spec
+    mkdir -p "$WPROOT/wp-content/uploads"
     run bash "$HOOK"
     [ "$status" -eq 0 ]
     run grep -c "wp-content/uploads" "$CALLS"

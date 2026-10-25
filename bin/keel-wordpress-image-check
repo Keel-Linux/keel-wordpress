@@ -17,6 +17,7 @@
 # - The route and the manifest in place, with lnmp's beside it, and no
 #   manifest of a database layer: two manifests that no other is built on
 #   leave keel inspect unable to name the appliance.
+# - Every path of state.replicate in the manifest is a directory of the image.
 # - The cron job of WordPress does not go through the web server: on the
 #   loopback address, port 80 is the health probe of Keel Web and answers
 #   404 to everything else.
@@ -89,6 +90,20 @@ done
 for path in mariadb.yaml postgresql.yaml; do
     if [ -e "$root/usr/share/keel/appliances/$path" ]; then
         fatal "/usr/share/keel/appliances/$path is in the image: keel inspect could not name the appliance"
+    fi
+done
+
+# Each path the manifest replicates is a directory of the image. Syncthing
+# puts a folder whose path is missing in error, and keel diff drifts on it
+# (keel-wordpress#30).
+manifest="$root/usr/share/keel/appliances/wordpress.yaml"
+replicate=$(sed -n '/^  replicate:/,/^\(  \)\{0,1\}[a-z]/{s/^    - //p}' "$manifest" 2>/dev/null || true)
+if [ -z "$replicate" ]; then
+    fatal "$manifest declares no state.replicate path: the check has nothing to look at"
+fi
+for path in $replicate; do
+    if [ ! -d "$root$path" ]; then
+        fatal "$path is declared in state.replicate and is not a directory of the image: Syncthing would put its folder in error"
     fi
 done
 

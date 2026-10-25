@@ -132,8 +132,23 @@ start_web() {
         || fatal "$WORDPRESS_WEB_SERVICE did not start"
 }
 
+# Each directory the manifest replicates has to exist before Syncthing
+# configures its folder, or the folder stays in error (keel-wordpress#30). The
+# image ships them; this makes one that a node lacks, on a replica too.
+ensure_replicated_dirs() {
+    local dir path
+    for dir in uploads themes plugins languages; do
+        path="$WORDPRESS_ROOT/wp-content/$dir"
+        [[ -d "$path" ]] && continue
+        mkdir -p "$path" || fatal "cannot make $path"
+        chown "$WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER" "$path" \
+            || fatal "cannot give $path to $WORDPRESS_WEB_USER"
+    done
+}
+
 if [[ "$replica" == true ]]; then
     write_config
+    ensure_replicated_dirs
     start_web
     mark_ready
     echo "this node is a replica (role '${role:-none}', read_only $read_only): the" \
@@ -156,6 +171,7 @@ MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
         "the declared secrets.db_password: see 35mysqlpass above"
 
 write_config
+ensure_replicated_dirs
 
 wp() {
     command wp --allow-root --path="$WORDPRESS_ROOT" "$@"

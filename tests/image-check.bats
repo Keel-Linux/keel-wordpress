@@ -14,7 +14,9 @@ setup() {
     mkdir -p "$T/etc/systemd/system/multi-user.target.wants" "$T/var/lib/dpkg" \
         "$T/etc/nginx/keel-default.d" "$T/etc/nginx/keel-front.d" "$T/usr/share/keel/appliances" \
         "$T/etc/php/8.4/fpm" "$T/var/www/wordpress/wp-includes" \
-        "$T/var/www/wordpress/wp-content" "$T/etc/cron.d" "$T/var/lib/mysql/mysql"
+        "$T/var/www/wordpress/wp-content/uploads" "$T/var/www/wordpress/wp-content/themes" \
+        "$T/var/www/wordpress/wp-content/plugins" "$T/var/www/wordpress/wp-content/languages" \
+        "$T/etc/cron.d" "$T/var/lib/mysql/mysql"
     ln -s /dev/null "$T/etc/systemd/system/mariadb.socket"
     ln -s /dev/null "$T/etc/systemd/system/mariadb-extra.socket"
     ln -s /usr/lib/systemd/system/php8.4-fpm.service \
@@ -34,6 +36,27 @@ setup() {
     run "$CHECK"
     echo "$output"
     [ "$status" -eq 0 ]
+}
+
+@test "a replicated path that the image does not ship fails the build (keel-wordpress#30)" {
+    rmdir "$T/var/www/wordpress/wp-content/languages"
+    run "$CHECK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"/var/www/wordpress/wp-content/languages"* ]]
+}
+
+@test "every path the manifest replicates is checked, not only languages" {
+    rmdir "$T/var/www/wordpress/wp-content/plugins"
+    run "$CHECK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"/var/www/wordpress/wp-content/plugins"* ]]
+}
+
+@test "a manifest that replicates nothing fails the build, so the check cannot pass on nothing" {
+    sed -i '/^state:/,/^options:/d' "$T/usr/share/keel/appliances/wordpress.yaml"
+    run "$CHECK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"declares no state.replicate path"* ]]
 }
 
 @test "apache2 in the image fails the build" {
