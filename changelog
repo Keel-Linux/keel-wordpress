@@ -1,3 +1,95 @@
+keel-wordpress-19.0 (11) keel; urgency=medium
+
+  * The image ships wp-content/languages, owned by the web user like
+    uploads, themes and plugins (Keel-Linux/keel-wordpress#30). The manifest
+    replicates that path, and Syncthing put its folder in error while the
+    directory was missing. The build check now fails when a path of
+    state.replicate is not a directory of the image, and the first boot
+    hook makes a missing one, on a replica too.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sun, 25 Oct 2026 12:00:00 +0000
+
+keel-wordpress-19.0 (10) keel; urgency=medium
+
+  * The appliance manifest declares the state it replicates (handbook
+    decision 0050, amendment of 2026-10-20, and its note of 2026-10-24):
+    wp-content/uploads, wp-content/themes, wp-content/plugins and
+    wp-content/languages — without languages a replica serves the site
+    untranslated after a flip. One Syncthing folder per path on a database
+    pair. cache, upgrade and upgrade-temp-backup are inside no replicated
+    path and replicate nowhere (rule 23 of docs/manifest-v1.md). The
+    manifest change is validated at build time; the mechanism is
+    Keel-Linux/keel#221.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sat, 24 Oct 2026 12:00:00 +0000
+
+keel-wordpress-19.0 (9) keel; urgency=medium
+
+  * A JSON write to /wp-json/ may be 1 MiB (Keel-Linux/common#61).
+    keel-overlay-coraza 0.1.4 refuses a JSON body of more than 256 KiB, and
+    a block editor save of a long post is larger. Rule 10102 of
+    keel-wordpress-before.conf sets the limit again, for these writes only.
+    19.0-8 is a testing build with the 256 KiB limit.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 17:00:00 +0000
+
+keel-wordpress-19.0 (8) keel; urgency=medium
+
+  * A media upload of up to 64 MB works behind Anubis and Coraza
+    (Keel-Linux/keel-web#15). /etc/nginx/keel-front.d/60-keel-wordpress.conf
+    sets the body limit of the front site, which keel-web 0.3.2 includes
+    (0.3.1 set a limit of its own in the front, which Nginx refuses to have
+    twice). A testing build 19.0-7 carried that defect and is not published.
+    The memory of a worker stays bounded with keel-overlay-coraza 0.1.4: an
+    upload of 32 MiB costs about 10 MiB. The build fails without the file.
+  * The exclusion of the REST API for Coraza reads only the content fields
+    of the post (json.content, json.title, json.excerpt) now that
+    keel-overlay-coraza 0.1.4 selects the JSON body processor
+    (Keel-Linux/common#59). Every other field keeps its rules.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 12:00:00 +0000
+
+keel-wordpress-19.0 (6) keel; urgency=medium
+
+  * WordPress is a layer on lnmp and is served by nginx and PHP-FPM
+    (handbook decision 0059). Apache, mod_php, mod_security2, mod_evasive and
+    Webmin's Apache module are gone, and so is the staging archive that the
+    build copied: the project packages come from the Keel archive, as in
+    lnmp.
+  * The site is /etc/nginx/keel-default.d/60-keel-wordpress.conf, in the
+    include directory of keel-web 0.3.0, so it answers in the simple mode
+    and behind Anubis. Pretty permalinks use try_files. It refuses
+    wp-config.php, PHP in the directories that the web user writes, the PHP
+    files of wp-includes, hidden files, and log and dump files. xmlrpc.php is
+    reachable, as it was.
+  * The appliance has a manifest, wordpress.yaml (base lnmp), with the
+    options of its first boot hook. An instance description names the
+    appliance: appliance.name: wordpress, and app.options.db_user: wordpress.
+  * A replica gets wp-config.php and nothing in the database. The WordPress
+    schema is made by the first boot of a primary or a standalone node, not
+    by the image, so keel seeds a replica with no flag. The first boot sets
+    the permalink structure of a new site to the post name.
+  * wp-config.php sets HTTPS to on when the scheme is https. Behind Anubis
+    the request reaches PHP-FPM with X-Forwarded-Proto and no HTTPS variable,
+    and WordPress redirected wp-login.php to itself for ever (found in the
+    cross-site test, 2026-10-18).
+  * The site is closed (503) until the first boot hook has finished, so the
+    WordPress installer is never offered. Every PHP file of wp-includes is
+    refused, except the compressor of TinyMCE.
+  * /etc/coreruleset/plugins/keel-wordpress-before.conf: behind Coraza, a
+    write with a JSON body to /wp-json/ is not read by the Core Rule Set. The
+    block editor could not save a post (rule 941180).
+  * The boot test reads the manifest of the appliance from the assembled
+    rootfs (keel spec apply --root), as keel-lnmp does: the runner of the
+    image gate holds none.
+  * wp-cron runs through wp-cli as the web user. The old job requested
+    wp-cron.php on the loopback address, where port 80 is the health probe
+    of Keel Web and answers 404.
+  * The panel opens 22, 80, 443 and 12321, as Core does: the web shell is not
+    in Core any more.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 18 Oct 2026 04:00:00 +0000
+
 turnkey-wordpress-19.0 (5) turnkey; urgency=medium
 
   * bin/wordpress.py draws its password boxes on the terminal.

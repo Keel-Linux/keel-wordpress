@@ -56,11 +56,9 @@ and on top of that:
      site.
 
 - SSL support out of the box.
-- `Adminer`_ administration frontend for MySQL (listening on port
-  12322 - uses SSL).
 - Postfix MTA (bound to localhost) to allow sending of email (e.g.,
   password recovery).
-- Webmin modules for configuring Apache2, PHP, MySQL (MariaDB) and Postfix.
+- Webmin modules for configuring PHP, MySQL (MariaDB) and Postfix.
 
 See the `WordPress docs`_ for further details (including multisite
 howto).
@@ -70,16 +68,44 @@ Keel Linux: the layer, the first boot and the update path
 
 This appliance is built as a Keel layer, not as a whole root filesystem::
 
-    bt-layer wordpress --parent mariadb
+    bt-layer wordpress --parent lnmp
 
-**The parent is the published ``mariadb`` layer today, and it will move.** That
-layer is already built, tested and published, so what this recipe adds is
-Apache, PHP and WordPress and nothing else. An ``apache-php`` layer is being
-extracted; when it lands, this appliance's parent becomes that layer and the
-``wordpress`` layer is rebuilt on it. Nobody should be surprised by that: layers
-are content addressed, so a new parent means a new digest and a cheap rebuild,
-and ``.github/workflows/tests.yml`` and this section are the two places that
-name the parent.
+**The parent is the ``lnmp`` layer** (handbook decision 0059: nginx is the only
+web server in Keel, and Apache is retired). The chain is Core, Web, LNMP and
+WordPress. Web brings nginx; LNMP brings PHP-FPM 8.4 and MariaDB 11.8, the
+first boot hooks of the database and the check page at ``/keel-check/``. What
+this recipe adds is the PHP modules that WordPress wants, WordPress and wp-cli,
+its route, its first boot hook and its manifest, and nothing else.
+
+The site is ``/etc/nginx/keel-default.d/60-keel-wordpress.conf``, in the include
+directory of Keel Web, so it answers in the simple mode and behind Anubis. The
+default site of Keel Web already has a ``location /``, so the site is made of
+regular expressions, which nginx tries after the prefixes and in file order,
+and the last one is the catch-all (``try_files`` with a fallback to
+``index.php``, which is what pretty permalinks need). It refuses
+``wp-config.php``, PHP in ``uploads`` and the other directories the web user
+writes, the PHP files of ``wp-includes``, hidden files except ``.well-known``,
+and log and dump files. ``xmlrpc.php`` is reachable, as it was under Apache.
+
+The appliance has a manifest, ``wordpress.yaml`` (base ``lnmp``), so an
+instance description names it with ``appliance.name: wordpress``. The database
+account is lnmp's option ``db_user``: set it to ``wordpress``.
+
+Behind Anubis and Coraza (the cloud modes) two files of this layer make the
+site work. ``/etc/nginx/keel-front.d/60-keel-wordpress.conf`` sets the body
+limit of the front site of Keel Web to 64 MB, as PHP has it (the front site
+has 1 MB without it, and answers 413 to a media upload). It needs keel-web
+0.3.2. The files of an upload are no argument for Coraza (keel-overlay-coraza
+0.1.4), so a worker keeps its memory: an upload of 32 MiB costs about 10 MiB.
+And ``/etc/coreruleset/plugins/keel-wordpress-before.conf`` keeps the Core
+Rule Set from reading the content fields of a JSON write to ``/wp-json/``,
+because the rules take the HTML of the blocks of the editor as an attack.
+
+A replica gets ``wp-config.php`` and nothing in the database. The WordPress
+schema is made by the first boot of a primary or a standalone node and not by
+the image, because keel replaces a replica's databases with a copy of the
+primary and refuses to do it without ``--destroy-local-database`` when the
+server holds a schema that is not its own.
 
 Nothing is decided at build time
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -102,7 +128,8 @@ visitor. ``firstboot.d/40wordpress`` reads:
 ``secrets.db_password``      the database password, which the parent layer's
                              ``35mysqlpass`` has already given to the database
 ``app.options.db_user``      the database account (the same field the parent
-                             layer reads, so one declaration serves both)
+                             layer reads, so one declaration serves both);
+                             ``wordpress``
 ``app.options.db_name``      the database
 ``app.email``                the administrator's address
 ``app.domain``              the site URL recorded at install time
@@ -113,7 +140,7 @@ Neither password is ever an argument of another process: ``wp-config.php`` is
 written by a shell function, and the administrator's password is set through
 the environment of one ``wp-cli`` call. The hook finishes by asking the site to
 authenticate that account, and to refuse a wrong password, before it lets
-Apache serve anything.
+the site serve anything.
 
 ``wp-config.php`` derives ``WP_HOME`` and ``WP_SITEURL`` from the ``Host``
 header of each request rather than reading them from the database, so the site
@@ -193,19 +220,19 @@ trust.
 Ports, and what listens
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-80 and 443 are the site, on both address families; 12320 is the web shell and
-12321 Webmin, both from Core. 3306 is **closed**, although the parent layer
-opens it: this appliance reaches its own database over the loopback, and
-``wp-config.php`` names ``[::1]``. ``/etc/cron.d/wordpress-cron`` reaches
-``wp-cron.php`` over the IPv6 loopback literal, because on Debian
-``localhost`` is an IPv4 name only.
+80 and 443 are the site, on both address families, and 12321 is Webmin from
+Core. 3306 is **closed** to the network: this appliance reaches its own
+database over the loopback, and ``wp-config.php`` names ``[::1]``. On a pair
+the manifest of lnmp makes 3306 a mesh port, open on the WireGuard interface
+only. ``/etc/cron.d/wordpress-cron`` runs the due events with ``wp cron event
+run`` as the web user: on the loopback addresses, port 80 is the health probe of
+Keel Web and answers 404 to everything else, so a request to ``wp-cron.php``
+there never reaches WordPress.
 
-Adminer, ``lighttpd`` and the rest of ``turnkey/lamp`` are left out. The
-database is administered through ``webmin-mysql`` in the panel Core already
-carries, and Adminer would bring a second first boot hook at 35 reading the
-same ``DB_PASS`` for an account this appliance does not use. The parent layer's
-own ``admin`` database account is left unable to authenticate unless an
-instance declares it, which is the state that layer publishes it in.
+Adminer and the rest of ``turnkey/lamp`` are left out. The database is
+administered through ``webmin-mysql`` in the panel Core already carries. The
+parent layer's own ``admin`` database account is left unable to authenticate
+unless an instance declares it, which is the state that layer publishes it in.
 
 Running one
 ~~~~~~~~~~~~

@@ -1,0 +1,120 @@
+#!/bin/bash
+# Run by conf.d/main at the end of the build, in the image chroot of the
+# wordpress layer. It changes nothing: it fails the build when the image is
+# not what a first boot of Keel WordPress starts from (handbook decision
+# 0059), and reports every problem it finds.
+#
+# - Nothing of Apache: no apache2, no libapache2-mod-* installed.
+# - The socket units of MariaDB masked (keel-mariadb#29), as lnmp leaves
+#   them: with one active, 3306 listens on every address.
+# - PHP-FPM enabled, with allow_url_fopen on for the update check.
+# - The WordPress tree in place and no wp-config.php: the layer carries no
+#   credential.
+# - No WordPress schema in the data directory. A schema in the image is a
+#   local database on a node that becomes a replica, and keel refuses to
+#   replace it without --destroy-local-database. The first boot of a
+#   primary makes it (firstboot.d/40wordpress).
+# - The route and the manifest in place, with lnmp's beside it, and no
+#   manifest of a database layer: two manifests that no other is built on
+#   leave keel inspect unable to name the appliance.
+# - Every path of state.replicate in the manifest is a directory of the image.
+# - The cron job of WordPress does not go through the web server: on the
+#   loopback address, port 80 is the health probe of Keel Web and answers
+#   404 to everything else.
+# - No credential file of MariaDB in the image.
+#
+# KEEL_CONF_ROOT is the tree to work on, empty (the chroot's /) in a
+# build; tests/image-check.bats sets it to a scratch tree.
+root="${KEEL_CONF_ROOT:-}"
+failed=0
+
+fatal() {
+    echo "FATAL: $*" >&2
+    failed=1
+}
+
+# installed PACKAGE-GLOB: the names of the installed packages that match,
+# from the dpkg status file of the tree
+installed() {
+    local name="" status
+    while IFS= read -r line; do
+        case "$line" in
+            "Package: "*) name=${line#Package: } ;;
+            "Status: "*)
+                status=${line#Status: }
+                # shellcheck disable=SC2053
+                [[ "$status" == "install ok installed" && "$name" == $1 ]] && echo "$name"
+                ;;
+        esac
+    done < "$root/var/lib/dpkg/status"
+}
+
+for glob in apache2 'apache2-*' 'libapache2-mod-*'; do
+    for name in $(installed "$glob"); do
+        fatal "$name is installed: Keel WordPress is served by nginx and PHP-FPM, never Apache"
+    done
+done
+
+for unit in mariadb.socket mariadb-extra.socket; do
+    if [ "$(readlink "$root/etc/systemd/system/$unit" 2>/dev/null || true)" != /dev/null ]; then
+        fatal "$unit is not masked: 3306 would listen on every address"
+    fi
+done
+
+if [ ! -L "$root/etc/systemd/system/multi-user.target.wants/php8.4-fpm.service" ]; then
+    fatal "php8.4-fpm.service is not enabled: the site would not answer"
+fi
+if ! grep -qx 'allow_url_fopen = On' "$root"/etc/php/8.4/fpm/php.ini 2>/dev/null; then
+    fatal "allow_url_fopen is not on in PHP-FPM's php.ini: WordPress could not check for updates"
+fi
+
+if [ ! -f "$root/var/www/wordpress/wp-includes/version.php" ]; then
+    fatal "/var/www/wordpress/wp-includes/version.php is not in the image: no WordPress"
+fi
+if [ -e "$root/var/www/wordpress/wp-config.php" ]; then
+    fatal "/var/www/wordpress/wp-config.php is in the image: it would hold a credential of every machine"
+fi
+if [ -e "$root/var/lib/mysql/wordpress" ]; then
+    fatal "/var/lib/mysql/wordpress is in the image: a replica would hold a local database"
+fi
+
+for path in /etc/nginx/keel-default.d/60-keel-wordpress.conf \
+        /etc/nginx/keel-front.d/60-keel-wordpress.conf \
+        /usr/share/keel/appliances/wordpress.yaml \
+        /usr/share/keel/appliances/lnmp.yaml; do
+    if [ ! -f "$root$path" ]; then
+        fatal "$path is not in the image"
+    fi
+done
+
+for path in mariadb.yaml postgresql.yaml; do
+    if [ -e "$root/usr/share/keel/appliances/$path" ]; then
+        fatal "/usr/share/keel/appliances/$path is in the image: keel inspect could not name the appliance"
+    fi
+done
+
+# Each path the manifest replicates is a directory of the image. Syncthing
+# puts a folder whose path is missing in error, and keel diff drifts on it
+# (keel-wordpress#30).
+manifest="$root/usr/share/keel/appliances/wordpress.yaml"
+replicate=$(sed -n '/^  replicate:/,/^\(  \)\{0,1\}[a-z]/{s/^    - //p}' "$manifest" 2>/dev/null || true)
+if [ -z "$replicate" ]; then
+    fatal "$manifest declares no state.replicate path: the check has nothing to look at"
+fi
+for path in $replicate; do
+    if [ ! -d "$root$path" ]; then
+        fatal "$path is declared in state.replicate and is not a directory of the image: Syncthing would put its folder in error"
+    fi
+done
+
+if [ ! -f "$root/etc/cron.d/wordpress-cron" ]; then
+    fatal "/etc/cron.d/wordpress-cron is not in the image: WordPress would never run its scheduled work"
+elif grep -vE '^[[:space:]]*#' "$root/etc/cron.d/wordpress-cron" | grep -qE 'curl|wp-cron\.php'; then
+    fatal "/etc/cron.d/wordpress-cron goes through the web server: it would get the 404 of the health probe"
+fi
+
+if [ -e "$root/root/.my.cnf" ]; then
+    fatal "/root/.my.cnf is in the image: a credential of MariaDB would be every machine's"
+fi
+
+exit "$failed"

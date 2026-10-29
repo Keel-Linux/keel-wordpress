@@ -1,6 +1,8 @@
 #!/bin/bash -ex
-# WordPress under /var/www/wordpress, Apache serving it on both ports, and an
-# empty database waiting for a password nobody has chosen yet.
+# WordPress under /var/www/wordpress, nginx serving it on both ports through
+# PHP-FPM, and a database account that waits for a password nobody has chosen
+# yet. The layer is built on lnmp (handbook decision 0059): nginx, PHP-FPM and
+# MariaDB, the hooks of the database and the check page are the parent's.
 #
 # What this script deliberately does NOT do, and what upstream's does: run the
 # installation. Upstream's conf.d/main creates the database user with
@@ -13,12 +15,15 @@
 # script leaves the machine in the one state that cannot leak: a database
 # account that authenticates nothing and no wp-config.php at all.
 #
+# The schema is not made here either. A schema in the image is a local
+# database on a node that becomes a replica, and keel refuses to replace it
+# without --destroy-local-database. The first boot of a primary or a
+# standalone node makes it.
+#
 # Common has already run (COMMON_CONF of the mk files the Makefile includes):
-# turnkey.d, then apache-vhost, apache-headers, apache-security and
-# apache-ssl, then php, then mysql. So mod_ssl, mod_headers, mod_security2 and
-# mod_evasive are enabled, the hardened cipher list is in
-# mods-available/ssl.conf, php.ini carries the PHP_* of the Makefile, and the
-# database has had its anonymous users and its test database removed.
+# turnkey.d, then php and php-fpm, so the php.ini of PHP-FPM carries the PHP_*
+# of the Makefile. The parent layer has removed the anonymous users and the
+# test database of MariaDB.
 
 WPROOT=/var/www/wordpress
 WEB_USER=www-data
@@ -54,9 +59,9 @@ fi
 
 fatal() { echo "fatal [conf.d/main]: $*" >&2; exit 1; }
 
-# PHP: WordPress reads remote files for the update check and for oEmbed.
-sed -i "s|^allow_url_fopen.*|allow_url_fopen = On|" /etc/php/?.?/apache2/php.ini
-grep -q '^allow_url_fopen = On$' /etc/php/?.?/apache2/php.ini
+# PHP-FPM: WordPress reads remote files for the update check and for oEmbed.
+sed -i "s|^allow_url_fopen.*|allow_url_fopen = On|" /etc/php/?.?/fpm/php.ini
+grep -q '^allow_url_fopen = On$' /etc/php/?.?/fpm/php.ini
 
 # wp-cli, pinned and verified. The first boot hook is the only thing that uses
 # it unattended, and a person uses it afterwards through keel-wp.
@@ -97,10 +102,10 @@ keel-wp core verify-checksums --version="$WP_VERSION"
 # point of this recipe is that the layer carries no credential.
 [ ! -e "$WPROOT/wp-config.php" ] || fatal "the layer must not carry a wp-config.php"
 
-# The database, and the account that cannot log in yet.
+# The account that cannot log in yet, on every host it may connect from. The
+# schema is made by the first boot hook (see the top of this file), and a
+# privilege on a schema that does not exist yet is allowed.
 service mysql start
-mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` \
-    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 for host in $DB_HOSTS; do
     mysql <<EOF
 CREATE USER IF NOT EXISTS '$DB_USER'@'$host'
@@ -110,10 +115,8 @@ EOF
 done
 mysql -e "FLUSH PRIVILEGES"
 
-# The database exists, the account exists on every host, and none of them can
-# log in: that is the state this layer is published in.
-mysql -N -B -e "SELECT COUNT(*) FROM information_schema.schemata \
-    WHERE schema_name='$DB_NAME'" | grep -qx 1
+# The account exists on every host and none of them can log in, and there is
+# no schema of ours: that is the state this layer is published in.
 for host in $DB_HOSTS; do
     mysql -N -B -e "SELECT COUNT(*) FROM mysql.global_priv \
         WHERE User='$DB_USER' AND Host='$host'" | grep -qx 1
@@ -121,6 +124,8 @@ done
 mysql -N -B -e "SELECT COUNT(*) FROM mysql.global_priv \
     WHERE User='$DB_USER' AND JSON_VALUE(Priv, '\$.authentication_string') \
         = '$DB_INVALID_HASH'" | grep -qx 3
+mysql -N -B -e "SELECT COUNT(*) FROM information_schema.schemata \
+    WHERE schema_name='$DB_NAME'" | grep -qx 0
 service mysql stop
 
 # Ownership. Core and configuration are root's; the web server keeps only the
@@ -128,72 +133,90 @@ service mysql stop
 chown -R root:root "$WPROOT"
 find "$WPROOT" -type d -exec chmod 0755 {} +
 find "$WPROOT" -type f -exec chmod 0644 {} +
-for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes; do
+# languages is a replicated path of the manifest (keel-wordpress#30): core
+# does not ship it, so it is made here.
+for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes languages; do
     install -d -o "$WEB_USER" -g "$WEB_USER" -m 0755 "$WPROOT/wp-content/$runtime_dir"
     chown -R "$WEB_USER:$WEB_USER" "$WPROOT/wp-content/$runtime_dir"
 done
 
-# Apache: this appliance's site replaces the Debian default one.
-a2dissite 000-default
-a2ensite wordpress
-a2enmod rewrite
-[ -L /etc/apache2/sites-enabled/wordpress.conf ] || fatal "the site is not enabled"
-[ ! -e /etc/apache2/sites-enabled/000-default.conf ] || fatal "the default site is still enabled"
+# nginx: the site is a file of keel-web's include directory. The default site
+# of Keel Web has to include that directory, or the route would be dead
+# weight. nginx is asked whether it would start with this configuration, on a
+# stand-in for the default site: the real one names the certificate that
+# keel-host-keys makes at the first boot, which a build does not have.
+ROUTE=/etc/nginx/keel-default.d/60-keel-wordpress.conf
+[ -f "$ROUTE" ] || fatal "$ROUTE is not in the image"
+grep -qxF '	include /etc/nginx/keel-default.d/*.conf;' /etc/nginx/sites-available/keel-default \
+    || fatal "the default site of keel-web does not include keel-default.d: keel-web 0.3.0 is the least"
+FRONT=/etc/nginx/keel-front.d/60-keel-wordpress.conf
+[ -f "$FRONT" ] || fatal "$FRONT is not in the image"
+grep -qxF '	include /etc/nginx/keel-front.d/*.conf;' /etc/nginx/sites-available/default-anubis \
+    || fatal "the front site of keel-web does not include keel-front.d: keel-web 0.3.2 is the least"
+NGINX_TEST=/etc/nginx/keel-wordpress-test.conf
+cat > "$NGINX_TEST" <<'EOF'
+pid /run/keel-wordpress-test.pid;
+error_log /dev/null;
+events { }
+http {
+    include /etc/nginx/mime.types;
+    server {
+        listen 127.0.0.1:65080 default_server;
+        root /var/www/keel-default;
+        include /etc/nginx/keel-default.d/*.conf;
+        location = /keel-health { try_files /.keel-health-is-no-file =204; }
+        location / { try_files $uri $uri/ =404; }
+    }
+}
+EOF
+nginx -t -c "$NGINX_TEST"
+rm -f "$NGINX_TEST"
 
-# common/conf/apache-ssl substitutes the hardened cipher list from a file
-# common/conf/turnkey.d/zz-ssl-ciphers leaves in /tmp. When that file is
-# missing the substitution silently produces an empty directive, and the
-# appliance ships a web server that will not start. keel-nodebb shipped
-# exactly that with nginx once, so this is asserted rather than assumed.
-SSL_CONF=/etc/apache2/mods-available/ssl.conf
-if grep -q 'ZZ_SSL_CIPHERS' "$SSL_CONF"; then
-    fatal "$SSL_CONF still carries the ZZ_SSL_CIPHERS placeholder"
-fi
-grep -Eq '^SSLCipherSuite +[A-Za-z0-9]' "$SSL_CONF" \
-    || fatal "$SSL_CONF has no cipher suite"
-
-# And the behaviour rather than the settings: Apache is asked whether it would
-# start with this configuration.
-apache2ctl configtest
-
-# fab-plan-resolve keeps a package the parent layer already carries at the
-# parent's version, so the two core packages are upgraded here from the build
-# time source (keel and keel-archive-keyring, new in the plan, were installed
-# from it already).
-#
-# The overlay of this appliance ships /etc/confconsole/services.txt, which is a
-# conffile of confconsole, so dpkg sees it as locally modified and asks what to
-# do with it. The conf script runs with stdin closed, dpkg reads end of file at
-# the prompt and leaves confconsole "install ok unpacked", which fails this
-# script. Keep the overlay's file without asking.
+# The project packages. fab-plan-resolve keeps a package the parent layer
+# already carries at the parent's version, so they are upgraded here from the
+# Keel archive the parent layer names (Core ships the source, the pin and the
+# key). The overlay of this layer ships /etc/confconsole/services.txt, a
+# conffile of confconsole: keep it without asking, since the conf script runs
+# with stdin closed.
 export DEBIAN_FRONTEND=noninteractive
+apt-get update --error-on=any
 apt-get install -y --only-upgrade \
     -o Dpkg::Options::=--force-confdef \
     -o Dpkg::Options::=--force-confold \
-    inithooks confconsole
+    inithooks confconsole keel
 
 # A half configured package keeps its new version, so check the state too.
-[[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel keel-archive-keyring \
-    | grep -c '^install ok installed$') -eq 4 ]]
+[[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel \
+    | grep -c '^install ok installed$') -eq 3 ]]
 
-# A floor, not a literal: the declarative first boot this appliance depends on
-# landed in these versions, and a build that read a stale index would ship an
-# appliance whose whole point does not work. conf.d/zz-project-packages is
-# where the archive freshness check itself lives; this is the minimum, which is
-# what publishing this layer requires.
-while read -r package floor; do
-    installed=$(dpkg-query -W -f '${Version}' "$package")
-    dpkg --compare-versions "$installed" ge "$floor" \
-        || fatal "$package $installed is older than $floor"
-done <<EOF
-inithooks 2.3.6+keel4
-confconsole 2.2.3+keel2
-keel 0.2.1
-EOF
-dpkg-query -W -f '${Package} ${Version} ${Status}\n' \
-    inithooks confconsole keel keel-archive-keyring
+# Each of the three at the version the Keel archive offers as its
+# candidate, from the suite of the track this build reads.
+/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel
 
-# conf.d/zz-project-packages runs after this script and checks these against
-# the archive the build read, then removes the build time source;
-# conf.d/zzz-keel-archive then enables the signed one. No version is asserted
-# here, because a literal one passes on a stale index.
+# The appliance manifest, validated and resolved along lnmp, web and core on
+# this very tree, so a manifest the booted machine would refuse fails the
+# build.
+keel manifest validate wordpress
+
+# The PHP the two eval-file scripts of the first boot hook run must parse.
+for php_file in /usr/lib/inithooks/lib/wordpress-set-password.php \
+        /usr/lib/inithooks/lib/wordpress-verify-login.php; do
+    php -l "$php_file"
+done
+
+# The image as a first boot of WordPress starts from: nothing of Apache, the
+# sockets masked, PHP-FPM enabled, the route and the manifest in place, no
+# schema, no credential file.
+/usr/local/lib/keel-build/keel-wordpress-image-check
+rm -rf /usr/local/lib/keel-build
+dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
+
+# No build time package source may reach the image, and the apt lists are
+# not shipped.
+rm -rf /var/lib/apt/lists/*
+if grep -rlsE 'trixie-staging|/srv/keel-apt|l=Keel Linux staging|keel-staging' /etc/apt/sources.list \
+    /etc/apt/sources.list.d /etc/apt/preferences /etc/apt/preferences.d /etc/apt/keyrings; then
+    echo "the apt files above name the build host's staging archive" >&2
+    exit 1
+fi
+[ ! -e /usr/local/lib/keel-build ]

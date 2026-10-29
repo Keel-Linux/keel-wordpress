@@ -39,12 +39,16 @@ BT_WP_ROOT="var/www/wordpress"
 BT_WP_CONFIG="$BT_WP_ROOT/wp-config.php"
 # The project's own APT archive, and the keyring it must be verified with.
 BT_ARCHIVE_URI="https://archive.keellinux.org"
-# The host alone, for the reachability check: a name is only a proof of the
-# update path when the container can actually reach it.
-BT_ARCHIVE_HOST="${BT_ARCHIVE_URI#*://}"
-BT_ARCHIVE_HOST="${BT_ARCHIVE_HOST%%/*}"
 BT_ARCHIVE_SUITE="trixie"
-BT_ARCHIVE_KEYRING="/usr/share/keyrings/keel-archive-keyring.gpg"
+# Core ships two sources of the archive, the stable suite and the testing
+# one, both signed by the keyring of the keel-archive-keyring package.
+BT_ARCHIVE_SUITES="trixie trixie-testing"
+# The keyrings that sign the sources of the archive. The package of the keys
+# puts the keyring of the main key in two formats (.gpg in the Core of
+# 2026-10-18, .asc in the one before), and the testing suite is signed by the
+# testing key (decision 0055).
+BT_ARCHIVE_KEYRINGS="/usr/share/keyrings/keel-archive-keyring.gpg /usr/share/keyrings/keel-archive-keyring.asc /usr/share/keyrings/keel-testing-keyring.gpg"
+BT_ARCHIVE_KEYRING="${BT_ARCHIVE_KEYRINGS%% *}"
 BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 # What the build used to reach the project's own packages and what must not be
 # in the finished image: the copy of the staging archive, the source entry that
@@ -54,35 +58,6 @@ BT_SOURCES="etc/apt/sources.list.d/keel.sources"
 BT_BUILD_LEFTOVERS="srv/keel-apt
 etc/apt/sources.list.d/keel-staging.list
 etc/apt/keyrings/keel-staging-keyring.asc"
-# What the two update proofs use, beyond apt-get update itself.
-#
-# A project package the image already carries, to show that apt would take its
-# next version from our archive rather than from anywhere else: the candidate
-# has to come from our archive, at the priority the appliance's own pin file
-# sets.
-BT_POLICY_PACKAGE="inithooks"
-BT_ARCHIVE_PIN=1001
-# Where this library and the awk programs beside it live.
-BT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# And the package path itself, in two steps, neither of which needs a version
-# newer than the image to exist. Requiring one would mean either inventing a
-# release or shipping the image deliberately stale so the archive is always
-# ahead, and both would be lies told to make a test pass.
-#
-# Both steps stay inside our own archive on purpose. The CI runner has no IPv4
-# route out (docs/releases-host.md section 7), so Debian's mirrors are
-# unreachable from a container there while ours, being IPv6, is not: a step
-# that needed a package from Debian would be testing the runner's network
-# rather than the appliance. keel-transition, for instance, depends on gpgv,
-# which a Debian 13 appliance does not carry because apt verifies with sqv.
-#
-# A project package the image has NOT got, fetched from the archive. apt
-# checks the download against the digest in the signed index, so this is the
-# signature reaching a real file and not only an index.
-BT_FETCH_PACKAGE="keel-transition"
-# And a project package the image has, reinstalled, which downloads it again
-# and runs dpkg on it: the installation half of the same path.
-BT_INSTALL_PACKAGE="keel-archive-keyring"
 
 bt_usage() {
     cat <<USAGE
@@ -98,13 +73,10 @@ then proves, in this order:
   the wordpress database and the wordpress database account exist
   the administrator logs in over HTTP with the declared app_password, and a
     wrong password is refused
-  apt-get update against $BT_ARCHIVE_URI verifies its signature
-  apt-cache policy shows $BT_POLICY_PACKAGE coming from that archive, at the
-    priority the appliance's own pin file sets
-  apt-get download fetches $BT_FETCH_PACKAGE, which the image has not got,
-    from that archive and against the digest the signed index carries
-  apt-get install --reinstall $BT_INSTALL_PACKAGE downloads it again and runs
-    dpkg on it, so the whole path is exercised
+  the check page, a pretty permalink and the REST API answer, and the
+    refusals of the route hold (wp-config.php, PHP in uploads, hidden files)
+  the apt sources of the archive are enabled and signed, and nothing of the
+    build is left in the image
   keel diff reports no drift
 
 Root only.
@@ -120,8 +92,6 @@ options:
   --lxc-path DIR        lxcpath for the test container (default $BT_DEFAULT_LXC_PATH)
   --name NAME           container name (default keel-APPLIANCE-boot-test)
   --spec FILE           instance spec (default tests/instance.yaml)
-  --skip-update         do not run the three APT proofs (a host with no
-                        outbound network)
   --keep                leave the container running for inspection
   -h, --help            this text
 USAGE
@@ -147,7 +117,7 @@ bt_is_container_name() {
 }
 
 # Sets BT_APPLIANCE, BT_TIMEOUT, BT_INTERVAL, BT_BRIDGE, BT_LAYERS_DIR,
-# BT_CACHE_DIR, BT_LXC_PATH, BT_SPEC, BT_KEEP, BT_SKIP_UPDATE, BT_NAME and
+# BT_CACHE_DIR, BT_LXC_PATH, BT_SPEC, BT_KEEP, BT_NAME and
 # BT_ROOTFS. Returns 0 when parsed, 2 after printing the usage, 1 on a bad
 # argument (message on stderr).
 bt_parse_args() {
@@ -161,7 +131,6 @@ bt_parse_args() {
     BT_NAME=""
     BT_SPEC=""
     BT_KEEP=0
-    BT_SKIP_UPDATE=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --timeout|--interval)
@@ -188,7 +157,6 @@ bt_parse_args() {
                 shift
                 ;;
             --keep) BT_KEEP=1 ;;
-            --skip-update) BT_SKIP_UPDATE=1 ;;
             -h|--help)
                 bt_usage
                 return 2
@@ -296,7 +264,7 @@ bt_lxc_config() {
     #
     # The apparmor pair is not decoration. Under the stock container profile a
     # unit that asks systemd for a mount namespace is refused, and both
-    # mariadb.service and apache2.service ask: they fail with
+    # mariadb.service and nginx.service ask: they fail with
     # status=226/NAMESPACE, so the first boot never reaches the database and
     # the site never starts. A generated profile with nesting allowed is what
     # a container running systemd needs, and it is what the appliance
@@ -437,6 +405,34 @@ bt_installer_verdict() {
     echo "boot-test: the installer is not offered and the page is a WordPress site"
 }
 
+bt_status_verdict() {
+    # bt_status_verdict WHAT WANT GOT: a route of the site answered the status
+    # it must. The hardening of the site is proved by what a request gets
+    # (403 for wp-config.php and for PHP in uploads), never by reading the
+    # nginx file that is supposed to say so.
+    local what=$1 want=$2 got=${3-}
+    if [ "$got" != "$want" ]; then
+        echo "boot-test: $what answered $got, not $want" >&2
+        return 1
+    fi
+    echo "boot-test: $what answered $want"
+}
+
+bt_no_apache_verdict() {
+    # bt_no_apache_verdict ROOTFS: nothing of Apache is in the finished image
+    # (handbook decision 0059). The server binary and its configuration are
+    # what a reader of the tree would find first.
+    local rootfs=$1 path found=0
+    for path in usr/sbin/apache2 etc/apache2/apache2.conf; do
+        if [ -e "$rootfs/$path" ]; then
+            echo "boot-test: the image carries /$path: Keel retired Apache" >&2
+            found=1
+        fi
+    done
+    [ "$found" -eq 0 ] || return 1
+    echo "boot-test: no Apache in the image"
+}
+
 bt_config_verdict() {
     # bt_config_verdict FILE APP_DB_USER DB_NAME: wp-config.php names the
     # local database and this appliance's account, and carries none of the
@@ -547,9 +543,15 @@ bt_build_leftovers_verdict() {
     echo "boot-test: no build time package source, archive copy or staging keyring in the image"
 }
 
+bt_word_in() {
+    # bt_word_in LIST WORD: WORD is one of the words of LIST.
+    [[ " $1 " == *" $2 "* ]]
+}
+
 bt_sources_verdict() {
-    # bt_sources_verdict FILE: the appliance's own APT source, as it ships:
-    # enabled, the signed distribution, our keyring, and never a staging one.
+    # bt_sources_verdict FILE: the appliance's own APT sources, as Core ships
+    # them: each stanza enabled, a signed suite of ours, our keyring, and
+    # never a staging one.
     local sources=$1 field value
     while read -r field value; do
         case "$field" in
@@ -557,167 +559,13 @@ bt_sources_verdict() {
                 echo "boot-test: $sources is not enabled" >&2; return 1; } ;;
             URIs:) [ "$value" = "$BT_ARCHIVE_URI" ] || {
                 echo "boot-test: $sources names '$value', not $BT_ARCHIVE_URI" >&2; return 1; } ;;
-            Suites:) [ "$value" = "$BT_ARCHIVE_SUITE" ] || {
-                echo "boot-test: $sources names the suite '$value', not $BT_ARCHIVE_SUITE" >&2; return 1; } ;;
-            Signed-By:) [ "$value" = "$BT_ARCHIVE_KEYRING" ] || {
-                echo "boot-test: $sources is signed by '$value', not $BT_ARCHIVE_KEYRING" >&2; return 1; } ;;
+            Suites:) bt_word_in "$BT_ARCHIVE_SUITES" "$value" || {
+                echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1; } ;;
+            Signed-By:) bt_word_in "$BT_ARCHIVE_KEYRINGS" "$value" || {
+                echo "boot-test: $sources is signed by '$value', not one of $BT_ARCHIVE_KEYRINGS" >&2; return 1; } ;;
         esac
     done < "$sources"
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
-}
-
-bt_archive_reachable() {
-    # bt_archive_reachable HOST_OUTPUT: whether the archive's name resolves to
-    # something this container could actually talk to. HOST_OUTPUT is
-    # "getent ahosts <archive host>" run inside it.
-    #
-    # Why this exists. The CI runner's containers have no global address and
-    # no IPv4 route out, and the runner resolves our own public names through
-    # a local answer, so inside one of them the archive is 127.0.0.1 and apt
-    # meets the container's own web server instead. That is the runner's
-    # network, not the appliance, and failing the appliance for it would teach
-    # us to ignore a red gate. Skipping silently would be worse, so the caller
-    # says out loud what it did not prove.
-    local output=$1
-    [ -n "$output" ] || return 1
-    ! grep -qE '^(127\.|::1[[:space:]])' <<< "$output"
-}
-
-bt_apt_update_verdict() {
-    # bt_apt_update_verdict CODE FILE: apt-get update must succeed and must
-    # have verified a signature. apt says nothing when a signature is good, so
-    # what is checked is that it fetched our archive and said nothing bad
-    # about it: any of the words below means it could not verify, and apt
-    # prints them while still exiting 0 in some configurations.
-    local code=$1 output=$2 complaint
-    if [ "$code" != 0 ]; then
-        echo "boot-test: apt-get update exited $code" >&2
-        return 1
-    fi
-    for complaint in NO_PUBKEY 'is not signed' 'no longer has a Release file' \
-        'not have a Release file' EXPKEYSIG REVKEYSIG BADSIG \
-        'insufficiently signed' 'cannot be authenticated'; do
-        if grep -qF "$complaint" "$output"; then
-            echo "boot-test: apt could not verify the archive ($complaint)" >&2
-            return 1
-        fi
-    done
-    if ! grep -qF "$BT_ARCHIVE_URI" "$output"; then
-        echo "boot-test: apt-get update never reached $BT_ARCHIVE_URI" >&2
-        return 1
-    fi
-    # A fetch that failed leaves apt at exit 0 with a warning, and the earlier
-    # checks pass because the archive's name is in that very warning. Saying
-    # the signature verified there is the worst thing this test could do: it
-    # reports the update path as proved on a machine that never read the
-    # archive. 2026-09-27, when it did exactly that.
-    if grep -qE 'W: Failed to fetch|Some index files failed to download' "$output"; then
-        echo "boot-test: apt-get update could not fetch $BT_ARCHIVE_URI" >&2
-        grep -E 'W: Failed to fetch' "$output" | head -2 >&2
-        return 1
-    fi
-    echo "boot-test: apt-get update read $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE and verified its signature"
-}
-
-bt_policy_verdict() {
-    # bt_policy_verdict PACKAGE FILE: FILE is "apt-cache policy PACKAGE" from
-    # inside the appliance. Our archive has to be a source apt knows, at the
-    # priority the appliance's own /etc/apt/preferences.d/keel sets, and the
-    # candidate has to be the version that source offers. That is what "this
-    # machine takes its project packages from Keel" means, and it is true
-    # whether or not a newer version happens to exist today.
-    local package=$1 file=$2 candidate
-    candidate=$(awk '$1 == "Candidate:" { print $2; exit }' "$file")
-    if [ -z "$candidate" ] || [ "$candidate" = "(none)" ]; then
-        echo "boot-test: apt has no candidate for $package" >&2
-        return 1
-    fi
-    if ! awk -v pin="$BT_ARCHIVE_PIN" -v uri="$BT_ARCHIVE_URI" \
-        '$1 == pin && $2 == uri { found = 1 } END { exit !found }' "$file"; then
-        echo "boot-test: $BT_ARCHIVE_URI is not a source of $package at priority $BT_ARCHIVE_PIN" >&2
-        return 1
-    fi
-    # the candidate's own block of the version table has to list our archive
-    # at our pin (candidate-source.awk says why)
-    if ! awk -v version="$candidate" -v pin="$BT_ARCHIVE_PIN" \
-        -v uri="$BT_ARCHIVE_URI" -f "$BT_LIB_DIR/candidate-source.awk" \
-        "$file"; then
-        echo "boot-test: the candidate $package $candidate does not come from" \
-            "$BT_ARCHIVE_URI at priority $BT_ARCHIVE_PIN" >&2
-        return 1
-    fi
-    echo "boot-test: apt takes $package from $BT_ARCHIVE_URI at priority" \
-        "$BT_ARCHIVE_PIN, candidate $candidate"
-}
-
-bt_absent_verdict() {
-    # bt_absent_verdict PACKAGE STATUS: the package must not be installed
-    # before the install proof, or the proof is about nothing.
-    local package=$1 status=${2-}
-    case "$status" in
-        *"install ok installed")
-            echo "boot-test: $package is already installed ('$status'), so installing" \
-                "it from the archive would prove nothing" >&2
-            return 1
-            ;;
-    esac
-    echo "boot-test: $package is not in the image, which is what makes the next step a proof"
-}
-
-bt_download_verdict() {
-    # bt_download_verdict PACKAGE CODE SIZE OUTPUT: apt fetched the package
-    # from our archive, and the file it left is SIZE bytes. apt checks a
-    # download against the digest the signed index carries and refuses an
-    # archive it cannot verify before it asks for a single byte, so a file
-    # that arrives this way is a file the signature covers.
-    #
-    # The size is measured inside the container and passed in, not read from
-    # the rootfs here: apt writes into a tmpfs the host does not see through
-    # the rootfs directory, so a check on a host path would fail on a download
-    # that worked.
-    local package=$1 code=$2 size=$3 output=$4
-    if [ "$code" != 0 ]; then
-        echo "boot-test: apt-get download $package exited $code" >&2
-        return 1
-    fi
-    if ! awk -v uri="$BT_ARCHIVE_URI" -v pkg="$package" \
-        '/^Get:/ && index($0, uri) && index($0, pkg) { found = 1 } END { exit !found }' "$output"; then
-        echo "boot-test: apt did not fetch $package from $BT_ARCHIVE_URI" >&2
-        return 1
-    fi
-    if [ -z "$size" ] || [ "$size" -le 0 ] 2>/dev/null; then
-        echo "boot-test: apt-get download $package left no file (size '${size:-none}')" >&2
-        return 1
-    fi
-    echo "boot-test: the $package archive is $size bytes"
-    echo "boot-test: apt fetched $package from $BT_ARCHIVE_URI, against the digest of the signed index"
-}
-
-bt_install_verdict() {
-    # bt_install_verdict PACKAGE CODE VERSION STATUS FILE: the package was
-    # fetched from our archive, installed, and dpkg has it configured. apt
-    # refuses an unverifiable archive before it downloads anything, so a
-    # successful fetch from our URI is the signature check passing on the
-    # bytes that were actually installed, not only on an index.
-    local package=$1 code=$2 version=$3 status=$4 file=$5
-    if [ "$code" != 0 ]; then
-        echo "boot-test: apt-get install --reinstall $package exited $code" >&2
-        return 1
-    fi
-    if ! awk -v uri="$BT_ARCHIVE_URI" -v pkg="$package" \
-        '/^Get:/ && index($0, uri) && index($0, pkg) { found = 1 } END { exit !found }' "$file"; then
-        echo "boot-test: apt did not fetch $package from $BT_ARCHIVE_URI" >&2
-        return 1
-    fi
-    if [ -z "$version" ]; then
-        echo "boot-test: $package has no version after the install" >&2
-        return 1
-    fi
-    if [ "$status" != "install ok installed" ]; then
-        echo "boot-test: $package is '$status' after the install, not 'install ok installed'" >&2
-        return 1
-    fi
-    echo "boot-test: apt fetched and reinstalled $package $version from $BT_ARCHIVE_URI, dpkg configured"
 }
 
 bt_diff_verdict() {

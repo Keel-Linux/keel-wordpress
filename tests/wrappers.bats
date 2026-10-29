@@ -303,10 +303,10 @@ _runuser_command() {
     [ "$(stat -c %a "$WPROOT")" = 755 ]
 }
 
-@test "keel-wordpress-update leaves the five runtime directories to the web server" {
+@test "keel-wordpress-update leaves the six runtime directories to the web server" {
     run "$UPDATE"
     [ "$status" -eq 0 ]
-    for dir in uploads cache upgrade plugins themes; do
+    for dir in uploads cache upgrade plugins themes languages; do
         grep -q "^install -d -o $WEB_USER -g $WEB_USER -m 0755 $WPROOT/wp-content/$dir\$" \
             "$CALLS"
         grep -q "^chown -R $WEB_USER:$WEB_USER $WPROOT/wp-content/$dir\$" "$CALLS"

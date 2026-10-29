@@ -39,7 +39,7 @@ test -f "$WPROOT/wp-includes/version.php" || {
 chown -R root:root "$WPROOT"
 find "$WPROOT" -type d -exec chmod 0755 {} +
 find "$WPROOT" -type f -exec chmod 0644 {} +
-for runtime_dir in uploads cache upgrade plugins themes; do
+for runtime_dir in uploads cache upgrade plugins themes languages; do
     install -d -o "$WP_USER" -g "$WP_USER" -m 0755 \
         "$WPROOT/wp-content/$runtime_dir"
     chown -R "$WP_USER:$WP_USER" "$WPROOT/wp-content/$runtime_dir"

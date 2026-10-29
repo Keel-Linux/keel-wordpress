@@ -20,7 +20,16 @@
 #
 # Runs at 40, after 35mysqlpass of the parent layer, which starts the database
 # and sets that account's password, and after 15regen-sslcert, which replaces
-# the certificate Apache serves on 443.
+# the certificate nginx serves on 443.
+#
+# A replica gets wp-config.php and nothing else. The spec that declares
+# database.server.role: replica, or a server that is read only, says the
+# database comes from the primary with the copy that seeds it. The schema and
+# the site are made here on a primary or a standalone node only: a schema made
+# on a replica is a local database that keel refuses to replace without
+# --destroy-local-database, and its rows are writes the primary never saw.
+# The schema is made at the first boot and not in the image for the same
+# reason (the layer carries the account, which has no password, and no schema).
 #
 # Neither password is ever an argument of another process. wp-config.php is
 # written by a shell function, and the administrator's password is set through
@@ -58,7 +67,10 @@ db_name=$(wordpress_db_name "${APP_DB_NAME-}") \
 db_prefix=$(wordpress_db_prefix "${APP_DB_PREFIX-}") \
     || fatal "'${APP_DB_PREFIX-}' is not a table prefix this appliance will use"
 
-mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}")
+role=$(wordpress_spec_role "$WORDPRESS_SPEC") \
+    || fatal "cannot read database.server.role from $WORDPRESS_SPEC: a node that may be a replica writes nothing until it can"
+
+mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}" "$role")
 if [[ ${#missing[@]} -gt 0 ]]; then
     [[ -t 0 ]] || fatal "no ${missing[*]} in $INITHOOKS_CONF and no terminal to" \
         "ask on: declare secrets.app_password and secrets.db_password in the" \
@@ -66,7 +78,8 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     while IFS='=' read -r key value; do
         [[ -n "$key" ]] && declare "$key=$value"
     done < <("$INITHOOKS_PATH/bin/wordpress.py" "${missing[@]}")
-    [[ -n "${APP_PASS-}" && -n "${DB_PASS-}" ]] || fatal "no password given"
+    [[ -n "${DB_PASS-}" ]] || fatal "no password given"
+    [[ -n "${APP_PASS-}" || "$role" == replica ]] || fatal "no password given"
 fi
 
 # The database. 35mysqlpass started it and gave this account its password; do
@@ -75,17 +88,19 @@ fi
 systemctl start "$WORDPRESS_DB_SERVICE.service"
 wordpress_wait_ready "mysqladmin ping" "$WORDPRESS_WAIT_TRIES" \
     || fatal "$WORDPRESS_DB_SERVICE did not answer after $WORDPRESS_WAIT_TRIES tries"
-MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
-    --protocol=TCP --batch --skip-column-names \
-    --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
-    | grep -qx 1 \
-    || fatal "'$db_user' cannot reach the database '$db_name' on [::1]:3306 with" \
-        "the declared secrets.db_password: see 35mysqlpass above"
+read_only=$(mysql --batch --skip-column-names --execute='SELECT @@global.read_only') \
+    || fatal "cannot read @@global.read_only from $WORDPRESS_DB_SERVICE"
+replica=false
+if wordpress_is_replica "$role" "$read_only"; then
+    replica=true
+fi
 
-# wp-config.php, written once. The password reaches the file as a shell
-# function argument and appears nowhere else; the file is readable by the web
-# server and by nobody else, because PHP has to read it.
-if [[ ! -e "$WORDPRESS_CONFIG" ]]; then
+write_config() {
+    # wp-config.php, written once. The password reaches the file as a shell
+    # function argument and appears nowhere else; the file is readable by the
+    # web server and by nobody else, because PHP has to read it.
+    [[ ! -e "$WORDPRESS_CONFIG" ]] || return 0
+    local tmp
     tmp=$(mktemp "$WORDPRESS_ROOT/.wp-config.php.XXXXXX") \
         || fatal "cannot write beside $WORDPRESS_CONFIG"
     trap 'rm -f "$tmp"' EXIT
@@ -100,7 +115,63 @@ if [[ ! -e "$WORDPRESS_CONFIG" ]]; then
     trap - EXIT
     echo "wp-config.php written: database '$db_name' as '$db_user' on" \
         "$WORDPRESS_DB_HOST, password from DB_PASS $(wordpress_masked "$DB_PASS")"
+}
+
+# The site is open from here on. Until this file exists the route of the site
+# answers 503 (60-keel-wordpress.conf), so the installer is never offered.
+mark_ready() {
+    : > "$WORDPRESS_READY" || fatal "cannot write $WORDPRESS_READY"
+    chmod 0644 "$WORDPRESS_READY"
+}
+
+start_web() {
+    # The web server serves the site from now on. It is started rather than
+    # assumed, and never restarted: its site is a static file of keel-web and
+    # of this layer, and wp-config.php is read by PHP-FPM at each request.
+    systemctl start "$WORDPRESS_WEB_SERVICE.service" \
+        || fatal "$WORDPRESS_WEB_SERVICE did not start"
+}
+
+# Each directory the manifest replicates has to exist before Syncthing
+# configures its folder, or the folder stays in error (keel-wordpress#30). The
+# image ships them; this makes one that a node lacks, on a replica too.
+ensure_replicated_dirs() {
+    local dir path
+    for dir in uploads themes plugins languages; do
+        path="$WORDPRESS_ROOT/wp-content/$dir"
+        [[ -d "$path" ]] && continue
+        mkdir -p "$path" || fatal "cannot make $path"
+        chown "$WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER" "$path" \
+            || fatal "cannot give $path to $WORDPRESS_WEB_USER"
+    done
+}
+
+if [[ "$replica" == true ]]; then
+    write_config
+    ensure_replicated_dirs
+    start_web
+    mark_ready
+    echo "this node is a replica (role '${role:-none}', read_only $read_only): the" \
+        "WordPress site and its database come from the primary; nothing was" \
+        "written to the database"
+    exit 0
 fi
+
+# The schema, made here and not in the image (see the top of this file), and
+# then the account is asked whether it reaches it.
+mysql --batch --execute="$(wordpress_create_database_sql "$db_name")" \
+    || fatal "cannot create the database '$db_name' on $WORDPRESS_DB_SERVICE"
+mysql --batch --execute="$(wordpress_grant_sql "$db_name" "$db_user")" \
+    || fatal "cannot grant '$db_user' the database '$db_name' on $WORDPRESS_DB_SERVICE"
+MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
+    --protocol=TCP --batch --skip-column-names \
+    --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
+    | grep -qx 1 \
+    || fatal "'$db_user' cannot reach the database '$db_name' on [::1]:3306 with" \
+        "the declared secrets.db_password: see 35mysqlpass above"
+
+write_config
+ensure_replicated_dirs
 
 wp() {
     command wp --allow-root --path="$WORDPRESS_ROOT" "$@"
@@ -119,6 +190,11 @@ else
     wp "${install_args[@]}" --admin_password="$(openssl rand -base64 30)" \
         || fatal "wp core install failed"
     echo "WordPress installed: '$site_title' at $site_url, administrator '$admin_user'"
+    # Pretty permalinks. Only a new site gets them: the structure is a choice
+    # of the owner afterwards. nginx answers them with try_files, so the
+    # rules are not written to an .htaccess.
+    wp rewrite structure "$WORDPRESS_PERMALINKS" > /dev/null \
+        || fatal "cannot set the permalink structure"
 fi
 
 # The declared administrator password, and then the site's own answer to
@@ -140,10 +216,14 @@ WP_KEEL_USER="$admin_user" WP_KEEL_PASS="$APP_PASS" \
     wp eval-file "$INITHOOKS_PATH/lib/wordpress-verify-login.php" \
     || fatal "'$admin_user' cannot authenticate with the declared secrets.app_password"
 
-# The web server serves the site from now on. It is started rather than
-# assumed, because nothing before this hook needed it.
-systemctl restart "$WORDPRESS_WEB_SERVICE.service" \
-    || fatal "$WORDPRESS_WEB_SERVICE did not start"
+# wp-cli ran as root above, and WordPress made the directory of the month in
+# wp-content/uploads while it installed. Root owns that directory, and the web
+# user could not write a media file in it. The tree belongs to the web user.
+chown -R "$WORDPRESS_WEB_USER:$WORDPRESS_WEB_USER" "$WORDPRESS_ROOT/wp-content/uploads" \
+    || fatal "cannot give $WORDPRESS_ROOT/wp-content/uploads to $WORDPRESS_WEB_USER"
+
+start_web
+mark_ready
 
 echo "WordPress administrator '$admin_user' set from APP_PASS" \
      "$(wordpress_masked "$APP_PASS"), authenticated against the site itself"

@@ -1,0 +1,46 @@
+manifest_version: 1
+kind: appliance
+name: wordpress
+title: Keel WordPress
+summary: WordPress on nginx, PHP-FPM and MariaDB (the LNMP stack), alone or as a replicated pair (0047, 0059)
+base: lnmp
+# The processes, the checks and the overlays are lnmp's, Web's and Core's,
+# inherited with their states: nginx, PHP-FPM and MariaDB are already there,
+# and this layer adds none. The database account and its password are lnmp's
+# too (the option db_user and the secret db_password, whose names are unique
+# across the chain): an instance description of this appliance sets db_user
+# to wordpress, the account that the layer ships with no password and that
+# firstboot.d/35mysqlpass gives the declared one. The administrator's
+# password is secrets.app_password, a name of the spec itself.
+# state: the directories WordPress writes at run time (0050's amendment of
+# 2026-10-20, item 2, and its note of 2026-10-24: uploads, themes, plugins
+# and languages — without languages a replica serves the site untranslated
+# after a flip). On a database pair one Syncthing folder replicates each,
+# send-only on the primary and receive-only on the replica. cache, upgrade
+# and upgrade-temp-backup are inside no replicated path, so they replicate
+# nowhere: rule 23 of docs/manifest-v1.md wants an exclude inside a
+# replicated path, and none is declared here.
+state:
+  replicate:
+    - /var/www/wordpress/wp-content/uploads
+    - /var/www/wordpress/wp-content/themes
+    - /var/www/wordpress/wp-content/plugins
+    - /var/www/wordpress/wp-content/languages
+options:
+  - name: admin_user
+    type: string
+    default: admin
+    # the rule of wordpress_is_login in lib/wordpress.sh
+    pattern: '^[A-Za-z0-9._@+-]+$'
+  - name: site_title
+    type: string
+    default: WordPress
+  - name: db_name
+    type: string
+    default: wordpress
+    # a name that needs no quoting in a statement, wordpress_is_ident
+    pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+  - name: db_prefix
+    type: string
+    default: wp_
+    pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
