@@ -110,3 +110,14 @@ listen = d["database"]["server"].get("listen")
 sys.exit(0 if listen is None or own in [str(a) for a in listen] else 1)' "$REPO/keel/instance.pair.example.yaml"
     [ "$status" -eq 0 ]
 }
+
+# The boot test's spec writes out every overlay of the chain. The chain
+# replicates files (Web's state section and this manifest's), so keel spec
+# apply refuses a spec that leaves overlays.syncthing out (decisions 0027,
+# 0041), and the first boot writes no Monit file (keel#252, 2026-10-30).
+@test "manifest: the boot test's spec declares overlays.syncthing" {
+    run python3 -c 'import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+sys.exit(0 if (d.get("overlays") or {}).get("syncthing") in ("enabled", "disabled") else 1)' "$REPO/tests/instance.yaml"
+    [ "$status" -eq 0 ]
+}
