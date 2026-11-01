@@ -1,10 +1,10 @@
 # Example instance spec of Keel WordPress, the primary of a replicated pair in
 # a cloud simple installation (keel docs/spec.md and docs/replication.md;
 # handbook decisions 0047, 0049 and 0059): database.server with
-# appliance.vip, as on the lnmp layer. The replica has the same spec with
-# role: replica, its own hostname and the same VIP, and it needs no
-# secrets.app_password: the site and its administrator come with the copy of
-# the primary. Both nodes carry the same secrets.db_password. The pair needs
+# appliance.vip, as on the lnmp layer. The replica has its own spec:
+# keel/instance.pair-replica.example.yaml. It is not this file with only the
+# role changed, because a replica with no pair record must name its primary.
+# Both nodes carry the same secrets.db_password. The pair needs
 # the mesh first (keel mesh create, keel mesh invite, keel mesh join) and the
 # pair record (keel vip pair). Overlays are every overlay of the chain:
 # Core's five and Web's three.
