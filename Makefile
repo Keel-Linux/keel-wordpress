@@ -7,7 +7,8 @@
 # boot hooks of the database and the check page at /keel-check/. The delta
 # this recipe produces is the PHP modules WordPress wants, WordPress, wp-cli,
 # its route in /etc/nginx/keel-default.d/, its first boot hook and its
-# manifest. Apache is not part of it: Keel retired Apache (0059), and
+# manifest; conf.d/main removes the check page of lnmp and its hook, which a
+# WordPress product does not ship. Apache is not part of it: Keel retired Apache (0059), and
 # common's apache.mk, lamp.mk and Adminer are not used.
 #
 # PHP_* are read by common's conf/php. They are raised over lnmp's because a

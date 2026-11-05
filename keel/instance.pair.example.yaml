@@ -7,7 +7,7 @@
 # the primary. Both nodes carry the same secrets.db_password. The pair needs
 # the mesh first (keel mesh create, keel mesh invite, keel mesh join) and the
 # pair record (keel vip pair). Overlays are every overlay of the chain:
-# Core's five and Web's three.
+# Core's five and Web's four.
 version: 1
 
 instance:
@@ -53,6 +53,10 @@ overlays:
   nginx: enabled
   coraza: enabled
   anubis: enabled
+  # File replication of the pair (0050): the directories of wp-content that
+  # the manifest declares, send-only on the primary and receive-only on the
+  # replica. keel spec apply refuses a spec that leaves it out (keel#252).
+  syncthing: enabled
 
 database:
   server:

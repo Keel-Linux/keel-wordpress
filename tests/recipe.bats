@@ -138,6 +138,33 @@ code() {
     run ! grep -E '12320|Web shell' "$REPO/overlay/etc/confconsole/services.txt"
 }
 
+@test "recipe: the confconsole screen names no check page: the product ships none" {
+    run ! grep -iE 'check page|keel-check' "$REPO/overlay/etc/confconsole/services.txt"
+}
+
+@test "recipe: the conf script removes the stack check of lnmp, then the image check proves it" {
+    local main="$REPO/conf.d/main" rm_line check_line path
+    for path in /usr/lib/inithooks/firstboot.d/40lnmp-check \
+            /etc/nginx/keel-default.d/50-keel-lnmp.conf \
+            /usr/share/keel-lnmp/www; do
+        grep -qF "$path" "$main"
+    done
+    rm_line=$(grep -n '^rm -rf .*40lnmp-check' "$main" | head -1 | cut -d: -f1)
+    check_line=$(grep -n '^/usr/local/lib/keel-build/keel-wordpress-image-check' "$main" | head -1 | cut -d: -f1)
+    [ -n "$rm_line" ]
+    [ "$rm_line" -lt "$check_line" ]
+}
+
+@test "recipe: the overlay ships no file of the stack check" {
+    [ ! -e "$REPO/overlay/usr/lib/inithooks/firstboot.d/40lnmp-check" ]
+    [ ! -e "$REPO/overlay/etc/nginx/keel-default.d/50-keel-lnmp.conf" ]
+    [ ! -e "$REPO/overlay/usr/share/keel-lnmp" ]
+}
+
+@test "recipe: the overlay ships no console.sh: it is inithooks' file" {
+    [ ! -e "$REPO/overlay/usr/lib/inithooks/lib/console.sh" ]
+}
+
 @test "recipe: the boot test reads the manifest from the assembled rootfs" {
     # The spec names the appliance, and the host that runs the boot test
     # (the runner of the image gate) holds no manifest of it: the layer ships

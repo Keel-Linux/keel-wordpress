@@ -17,10 +17,17 @@ setup() {
     CALLS="$SCRATCH/calls"
     : > "$CALLS"
 
-    # the inithooks tree the hook reads itself from
+    # the inithooks tree the hook reads itself from. Each file of the library
+    # is a symlink to the real one, so kcov measures the file the appliance
+    # ships; console.sh is inithooks' own and is a stand-in (_console).
     IH="$SCRATCH/inithooks"
-    mkdir -p "$IH/bin"
-    ln -s "$REPO/overlay/usr/lib/inithooks/lib" "$IH/lib"
+    mkdir -p "$IH/bin" "$IH/lib"
+    local lib
+    for lib in "$REPO"/overlay/usr/lib/inithooks/lib/*; do
+        ln -s "$(cd "$(dirname "$lib")" && pwd)/$(basename "$lib")" "$IH/lib/"
+    done
+    _console deferred
+    unset INITHOOKS_UNATTENDED
 
     DEFAULTS="$SCRATCH/default-inithooks"
     CONF="$SCRATCH/inithooks.conf"
@@ -55,10 +62,20 @@ echo throwaway-password
 EOF
     chmod +x "$STUBS/openssl"
     # mysql: the schema count query answers 1, which means the account reached
-    # its database
+    # its database. A call with no --execute reads its statements from
+    # standard input, and they go to a file of their own, not to the log.
+    STDIN_SQL="$SCRATCH/stdin.sql"
     cat > "$STUBS/mysql" <<EOF
 #!/bin/bash
 echo "mysql \$*" >> "$CALLS"
+case "\$*" in
+    *--execute*) ;;
+    *)
+        cat >> "$STDIN_SQL"
+        [ -n "\${WP_TEST_ACCOUNT_FAILS:-}" ] && exit 1
+        exit 0
+        ;;
+esac
 case "\$*" in *--user*) [ -n "\${WP_TEST_DB_REFUSES:-}" ] && exit 1 ;; esac
 case "\$*" in
     *read_only*) echo \${WP_TEST_READ_ONLY:-0}; exit 0 ;;
@@ -115,6 +132,33 @@ echo "$1 \$*" >> "$CALLS"
 exit ${2:-0}
 EOF
     chmod +x "$SCRATCH/bin/$1"
+}
+
+# _console deferred|skipped: inithooks' lib/console.sh, as the hook relies on
+# it. console_unattended answers from INITHOOKS_UNATTENDED alone, the answer
+# run exports; the real rule is inithooks' and is measured there. "deferred"
+# is a library with console_deferred, which also records the hook so that
+# the first login starts keel-init; "skipped" is an older library with
+# console_skipped only.
+_console() {
+    {
+        cat <<'LIB'
+console_unattended() {
+    [[ -n "${INITHOOKS_UNATTENDED:-}" && "$INITHOOKS_UNATTENDED" != no ]]
+}
+console_skipped() {
+    echo "[$1] not asked, nobody can answer ($INITHOOKS_UNATTENDED): $2" >&2
+}
+LIB
+        if [[ "$1" == deferred ]]; then
+            cat <<LIB
+console_deferred() {
+    console_skipped "\$@"
+    echo "\$1" >> "$SCRATCH/deferred"
+}
+LIB
+        fi
+    } > "$IH/lib/console.sh"
 }
 
 # _conf [KEY=VALUE ...]: write the rendered inithooks conf, the declared values
@@ -288,22 +332,72 @@ EOF
 
 # --- nothing declared --------------------------------------------------------
 
-@test "a headless boot with no passwords says which fields to declare" {
+# Whether anybody can answer the dialog is inithooks' rule (lib/console.sh),
+# as for lnmp's 35mysqlpass. The hook used to test its own standard input for
+# a terminal, and tty1 of an LXC container is a terminal nobody is attached
+# to: a headless first boot drew the password box there, got no answer and
+# failed (BR2, 2026-11-05). Now the hook asks nothing, records that it is
+# deferred, and the first login starts keel-init, which asks the values.
+
+@test "a headless boot with no passwords defers the hook and says which fields to declare" {
     : > "$CONF"
+    export INITHOOKS_UNATTENDED="the console has no size, nobody is attached to it"
     run bash "$HOOK"
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[40wordpress] not asked, nobody can answer (the console has no size"* ]]
     [[ "$output" == *"APP_PASS"* ]]
     [[ "$output" == *"DB_PASS"* ]]
     [[ "$output" == *"secrets.app_password"* ]]
     [[ "$output" == *"secrets.db_password"* ]]
-    [ ! -e "$WPROOT/wp-config.php" ]
+    [[ "$output" == *"keel-init"* ]]
+    [ "$(cat "$SCRATCH/deferred")" = 40wordpress ]
 }
 
-@test "with a terminal the dialog is asked for each value and the boot goes on" {
+@test "a deferred hook writes nothing, starts nothing and leaves the site closed (503)" {
     : > "$CONF"
-    # script gives the hook a pty, so [[ -t 0 ]] is true and the dialog branch
-    # is the one taken. The stub answers on stdout, which the hook reads, so
-    # the evidence that it was called is in the call log.
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ ! -e "$WPROOT/wp-config.php" ]
+    [ ! -e "$WORDPRESS_READY" ]
+    run grep -cE "wordpress.py|^mysql|^wp |systemctl start" "$CALLS"
+    [ "$output" = "0" ]
+}
+
+@test "an inithooks without console_deferred gets the line of console_skipped" {
+    : > "$CONF"
+    _console skipped
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[40wordpress] not asked, nobody can answer (there is no terminal)"* ]]
+    [ ! -e "$SCRATCH/deferred" ]
+    [ ! -e "$WORDPRESS_READY" ]
+}
+
+@test "a headless boot with one password declared still defers for the other" {
+    _conf "APP_PASS=''"
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no APP_PASS in"* ]]
+    [ ! -e "$WORDPRESS_READY" ]
+}
+
+@test "a description that declares everything needs nobody at the console" {
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ ! -e "$SCRATCH/deferred" ]
+    [ -f "$WORDPRESS_READY" ]
+}
+
+@test "with somebody at the console the dialog is asked for each value and the boot goes on" {
+    : > "$CONF"
+    export INITHOOKS_UNATTENDED=no
+    # script gives the hook a pty, as keel-init at a console does. The stub
+    # answers on stdout, which the hook reads, so the evidence that it was
+    # called is in the call log.
     run script -qec "bash '$HOOK'" /dev/null
     [ "$status" -eq 0 ]
     run grep "wordpress.py" "$CALLS"
@@ -321,26 +415,107 @@ EOF
 echo "wordpress.py \$*" >> "$CALLS"
 EOF
     chmod +x "$IH/bin/wordpress.py"
+    export INITHOOKS_UNATTENDED=no
     run script -qec "bash '$HOOK'" /dev/null
     [ "$status" -ne 0 ]
     [[ "$output" == *"no password given"* ]]
+    [ ! -e "$WORDPRESS_READY" ]
+}
+
+@test "somebody at the console: the hook asks whatever its standard input is, as run found a console" {
+    : > "$CONF"
+    export INITHOOKS_UNATTENDED=no
+    run bash "$HOOK" < /dev/null
+    [ "$status" -eq 0 ]
+    grep -q "wordpress.py APP_PASS DB_PASS" "$CALLS"
 }
 
 @test "a missing conf file is not fatal on its own" {
     rm -f "$CONF"
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[40wordpress] not asked"* ]]
+}
+
+# --- the database account ----------------------------------------------------
+# 40wordpress gives its own account its password, through the root socket.
+# Under keel-init the inithooks conf is empty (98finalize blanked it), so
+# lnmp's 35mysqlpass sets its account 'admin' and not 'wordpress', and the
+# check below failed on BR2 (2026-11-05) with the site left at 503.
+
+@test "the account gets the declared password on its three hosts, by standard input" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
+    grep -qxF "ALTER USER 'wordpress'@'::1' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
+    grep -qxF "CREATE USER IF NOT EXISTS 'wordpress'@'127.0.0.1' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
+    # never on a command line: the call log holds every argument of mysql
+    run grep -c "declared-db-password" "$CALLS"
+    [ "$output" = "0" ]
+}
+
+@test "the account has its password before it is granted the schema and asked to reach it" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    account=$(grep -n "^mysql --batch$" "$CALLS" | head -1 | cut -d: -f1)
+    grant=$(grep -n "GRANT ALL PRIVILEGES" "$CALLS" | head -1 | cut -d: -f1)
+    create=$(grep -n "CREATE DATABASE" "$CALLS" | head -1 | cut -d: -f1)
+    [ -n "$account" ]
+    [ "$create" -lt "$account" ]
+    [ "$account" -lt "$grant" ]
+}
+
+@test "the keel-init path: an empty conf, the values asked, the account set with the asked password" {
+    : > "$CONF"
+    export INITHOOKS_UNATTENDED=no
+    run bash "$HOOK" < /dev/null
+    [ "$status" -eq 0 ]
+    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'asked-DB_PASS';" "$STDIN_SQL"
+    grep -q "define('DB_PASSWORD', 'asked-DB_PASS');" "$WPROOT/wp-config.php"
+    [ -f "$WORDPRESS_READY" ]
+}
+
+@test "a password with a quote and a backslash is escaped for SQL and kept as it is for PHP" {
+    _conf "DB_PASS='it'\\''s\\x'"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'it\\'s\\\\x';" "$STDIN_SQL"
+    grep -qF "define('DB_PASSWORD', 'it\\'s\\\\x');" "$WPROOT/wp-config.php"
+}
+
+@test "another account name is created and granted the schema" {
+    _conf "APP_DB_USER='blog'"
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    grep -qxF "CREATE USER IF NOT EXISTS 'blog'@'localhost' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
+    grep -q "TO 'blog'@'localhost'" "$CALLS"
+}
+
+@test "an account the server will not change is fatal, before wp-config.php" {
+    export WP_TEST_ACCOUNT_FAILS=1
     run bash "$HOOK"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"no terminal to"* ]]
+    [[ "$output" == *"cannot give 'wordpress' its password"* ]]
+    [ ! -e "$WPROOT/wp-config.php" ]
+    [ ! -e "$WORDPRESS_READY" ]
+}
+
+@test "a replica does not touch the account: it comes with the copy of the primary" {
+    _replica_spec
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    [ ! -e "$STDIN_SQL" ]
 }
 
 # --- the database refusing ---------------------------------------------------
 
-@test "a database that refuses the declared password names the hook before it" {
+@test "a database that refuses the declared password is fatal" {
     export WP_TEST_DB_REFUSES=1
     run bash "$HOOK"
     [ "$status" -ne 0 ]
     [[ "$output" == *"cannot reach the database"* ]]
-    [[ "$output" == *"35mysqlpass"* ]]
+    [[ "$output" != *"35mysqlpass"* ]]
     [ ! -e "$WPROOT/wp-config.php" ]
 }
 
@@ -493,9 +668,12 @@ _replica_spec() {
 @test "a replica still needs the database password, the same as the pair's primary" {
     _replica_spec
     _conf "DB_PASS=''"
+    export INITHOOKS_UNATTENDED="there is no terminal"
     run bash "$HOOK"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"DB_PASS"* ]]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no DB_PASS in"* ]]
+    [ ! -e "$WPROOT/wp-config.php" ]
+    [ ! -e "$WORDPRESS_READY" ]
 }
 
 @test "a replica that has a wp-config.php keeps it" {

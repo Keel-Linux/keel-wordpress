@@ -72,10 +72,19 @@ This appliance is built as a Keel layer, not as a whole root filesystem::
 
 **The parent is the ``lnmp`` layer** (handbook decision 0059: nginx is the only
 web server in Keel, and Apache is retired). The chain is Core, Web, LNMP and
-WordPress. Web brings nginx; LNMP brings PHP-FPM 8.4 and MariaDB 11.8, the
-first boot hooks of the database and the check page at ``/keel-check/``. What
-this recipe adds is the PHP modules that WordPress wants, WordPress and wp-cli,
-its route, its first boot hook and its manifest, and nothing else.
+WordPress. Web brings nginx; LNMP brings PHP-FPM 8.4 and MariaDB 11.8 and the
+first boot hooks of the database. What this recipe adds is the PHP modules
+that WordPress wants, WordPress and wp-cli, its route, its first boot hook and
+its manifest, and nothing else.
+
+LNMP also brings a stack check: the first boot hook ``40lnmp-check``, which
+makes a test database ``keel_check``, and the page ``/keel-check/`` that reads
+it. A WordPress product ships no test database and no page that shows the
+stack, so ``conf.d/main`` removes the hook, the route
+``50-keel-lnmp.conf`` and the page. The build records each removal in the
+layer, and ``keel assemble`` removes the path from the image. The build check
+of the image and the boot test prove that none is left; ``/keel-check/`` is a
+URL of WordPress here and answers its 404.
 
 The site is ``/etc/nginx/keel-default.d/60-keel-wordpress.conf``, in the include
 directory of Keel Web, so it answers in the simple mode and behind Anubis. The
@@ -125,8 +134,8 @@ visitor. ``firstboot.d/40wordpress`` reads:
 ``app.options.site_title``   the site title
 ``app.options.admin_user``   the WordPress administrator's login
 ``secrets.app_password``     that administrator's password
-``secrets.db_password``      the database password, which the parent layer's
-                             ``35mysqlpass`` has already given to the database
+``secrets.db_password``      the database password, which the hook gives to
+                             the database account through the root socket
 ``app.options.db_user``      the database account (the same field the parent
                              layer reads, so one declaration serves both);
                              ``wordpress``
@@ -138,9 +147,20 @@ visitor. ``firstboot.d/40wordpress`` reads:
 Every secret is a file reference in the instance description, never a literal.
 Neither password is ever an argument of another process: ``wp-config.php`` is
 written by a shell function, and the administrator's password is set through
-the environment of one ``wp-cli`` call. The hook finishes by asking the site to
-authenticate that account, and to refuse a wrong password, before it lets
-the site serve anything.
+the environment of one ``wp-cli`` call, and the statements that give the
+database account its password reach ``mysql`` on its standard input. The hook
+finishes by asking the site to authenticate that account, and to refuse a
+wrong password, before it lets the site serve anything.
+
+The hook owns its database account. Under ``keel-init`` the inithooks conf is
+empty, so the parent layer's ``35mysqlpass`` sets its own account ``admin``,
+and ``40wordpress`` sets ``wordpress`` with the password that it asks.
+
+A headless first boot that does not declare the two passwords asks nothing:
+nobody can answer tty1 of a container (inithooks' ``lib/console.sh``). The
+hook records that it is deferred and finishes, the site answers 503, and the
+first login starts ``keel-init``, which asks the passwords and completes the
+installation.
 
 ``wp-config.php`` derives ``WP_HOME`` and ``WP_SITEURL`` from the ``Host``
 header of each request rather than reading them from the database, so the site

@@ -4,39 +4,39 @@ Standard: decisions 0003 (90 percent per repository, 95 for code the project
 writes) and 0004 (bats plus kcov for shell; a build and a boot on LXC as the
 acceptance test of a recipe, docs/org-plan.md section 1).
 
-## Measured 2026-10-18
+## Measured 2026-11-05
 
 | File | Test | Lines | Note |
 | --- | --- | --- | --- |
-| `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (54 tests) | 99.15 percent (117/118) under kcov | every function and every branch, and the role of the node, the schema statement and the replica rule |
-| `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (47 tests) | 98.46 percent (64/65) under kcov | the hook itself, run for real, on a primary, a standalone node and a replica |
+| `overlay/usr/lib/inithooks/lib/wordpress.sh` | `tests/wordpress.bats` (59 tests) | 99.23 percent (129/130) under kcov | every function and every branch, and the role of the node, the schema statement, the statements of the database account and the replica rule |
+| `overlay/usr/lib/inithooks/firstboot.d/40wordpress` | `tests/hook.bats` (65 tests) | 98.84 percent (85/86) under kcov | the hook itself, run for real, on a primary, a standalone node and a replica; the account it gives its password by standard input; the deferral of a headless boot through inithooks' `lib/console.sh` (a stand-in), with and without `console_deferred` |
 | `overlay/usr/local/bin/keel-wp` | `tests/wrappers.bats` (25 tests) | 100 percent (8/8) under kcov | both cache branches, the quoting, the exit code it hands back, `DEBUG`, and the `turnkey-wp` link run for real |
 | `overlay/usr/local/sbin/keel-wordpress-update` | `tests/wrappers.bats` (the same 25) | 100 percent (21/21) under kcov | both guards refused and satisfied, each wp-cli call made to fail, the whole ownership boundary, and the two names it must not take from the environment |
-| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (62 tests) | 98.70 percent (227/230) under kcov | parsing, addresses, deadlines, the container marks, every verdict, the status of each route of the site, and the image carrying none of the build time files and a signed apt source |
+| `tests/lib/boot-test-lib.sh` | `tests/boot-test.bats` (65 tests) | 98.73 percent (234/237) under kcov | parsing, addresses, deadlines, the container marks, every verdict, the status of each route of the site, and the image carrying none of the build time files, nothing of the stack check of lnmp and a signed apt source |
 | `bin/keel-project-packages` | `tests/project-packages.bats` (6 tests) | 100 percent (32/32) under kcov | shared with keel-lnmp: each project package is at the candidate of the Keel archive |
-| `bin/keel-wordpress-image-check` | `tests/image-check.bats` (16 tests) | 97.50 percent (39/40) under kcov | the build time check of the image: no Apache, sockets masked, PHP-FPM enabled, no `wp-config.php`, no schema, no cron job through the web server |
-| `overlay/usr/lib/inithooks/bin/wordpress.py` | `tests/dialog.bats` (3 tests) | not measured (kcov measures the shell) | dialog wrapper, run as the hook runs it inside a pseudo terminal: the answers reach the hook and the boxes are drawn on the terminal |
-| `overlay/etc/nginx/keel-default.d/60-keel-wordpress.conf` | `tests/nginx.bats` (21 tests) | not measured (nginx configuration) | the refusals, the order of the locations, the PHP handler and the catch-all; `conf.d/main` runs `nginx -t` on it at the build, and the boot test asks each route |
+| `bin/keel-wordpress-image-check` | `tests/image-check.bats` (24 tests) | 98.00 percent (49/50) under kcov | the build time check of the image: no Apache, sockets masked, PHP-FPM enabled, no `wp-config.php`, no schema, no cron job through the web server, nothing of the stack check of lnmp |
+| `overlay/usr/lib/inithooks/bin/wordpress.py` | `tests/dialog.bats` (8 tests) | not measured (kcov measures the shell) | dialog wrapper, run as the hook runs it inside a pseudo terminal: the answers reach the hook and the boxes are drawn on the terminal; with every open by path refused (`pct enter`), the terminal on standard input or standard error is duplicated |
+| `overlay/etc/nginx/keel-default.d/60-keel-wordpress.conf` | `tests/nginx.bats` (24 tests) | not measured (nginx configuration) | the refusals, the order of the locations, the PHP handler and the catch-all; `conf.d/main` runs `nginx -t` on it at the build, and the boot test asks each route |
 | `overlay/etc/coreruleset/plugins/keel-wordpress-before.conf` | `tests/waf.bats` (5 tests) | not measured (Core Rule Set configuration) | the one exclusion of the REST API, read by the rule set before its own rules; the cross-site test saves a post through it |
-| `overlay/usr/share/keel/appliances/wordpress.yaml` | `tests/manifest.bats` (13 tests) | not measured | keel validates it and the three example specs when `KEEL_SRC` names a checkout of keel |
+| `overlay/usr/share/keel/appliances/wordpress.yaml` | `tests/manifest.bats` (16 tests) | not measured | keel validates it and the three example specs, and holds them against the `overlays.syncthing` rule of `keel spec apply`, when `KEEL_SRC` names a checkout of keel |
 | `overlay/usr/lib/inithooks/lib/*.php` | the boot test | integration only | two PHP files `wp eval-file` runs; `conf.d/main` has PHP lint them |
 | `conf.d/main` | the build | integration only | build time script, 0004 pragmatic limits |
 | `tests/boot-test.sh` | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the seven measured shell files: all above **97 percent**, 278 bats
+Total over the seven measured shell files: all above **97 percent**, 329 bats
 tests, none failing. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`,
 which the workflow sets to **97**, the lowest measured file. It is only ever
 raised (decision 0006).
 
     $ COVERAGE_THRESHOLD=97 tests/coverage.sh
     kcov line coverage (threshold 97 percent):
-     100.00  21/21  keel-wordpress-update
-     100.00  8/8  keel-wp
      100.00  32/32  keel-project-packages
-      97.50  39/40  keel-wordpress-image-check
-      99.15  117/118  wordpress.sh
-      98.46  64/65  40wordpress
-      98.70  227/230  boot-test-lib.sh
+      98.00  49/50  keel-wordpress-image-check
+     100.00  8/8  keel-wp
+      99.23  129/130  wordpress.sh
+      98.84  85/86  40wordpress
+     100.00  21/21  keel-wordpress-update
+      98.73  234/237  boot-test-lib.sh
 
 The move to nginx removed four measured files of the old recipe: the archive
 check, the two conf scripts that enabled the signed archive, and their tests.
@@ -84,9 +84,9 @@ nothing for this. So the property is the absence of `-L`, not the presence of
 
 The hook's one uncovered line is `done < <("$INITHOOKS_PATH/bin/wordpress.py"
 ...)`, the process substitution of the dialog branch, which kcov attributes no
-execution to; the branch itself is covered, by two cases that give the hook a
-pty with `script` so `[[ -t 0 ]]` is true. keel-mariadb records the same line
-for its own hook.
+execution to; the branch itself is covered, by the cases where somebody can
+answer the console (`INITHOOKS_UNATTENDED=no`). keel-mariadb records the same
+line for its own hook.
 
 It used to be nine lines, and eight of them were a measurement artefact worth
 removing rather than explaining: the hook carried two PHP programs quoted
@@ -99,9 +99,11 @@ with `wp eval-file`.
 
 The hook is executed for real against scratch directories, with `systemctl`,
 `mysqladmin`, `mysql`, `php`, `wp`, `chown` and `openssl` as `PATH` stubs that
-log every call, and a scratch `INITHOOKS_PATH` whose `lib` is a symlink to the
-real library, so kcov measures the file the appliance ships. No test needs
-root, a database, a web server or a network.
+log every call, and a scratch `INITHOOKS_PATH` whose `lib` holds a symlink to
+each real file of the library, so kcov measures the file the appliance ships.
+`lib/console.sh` is inithooks' file, so it is a stand-in that answers from
+`INITHOOKS_UNATTENDED` alone, in two forms: with `console_deferred` and
+without it. No test needs root, a database, a web server or a network.
 
 What they are really about is the defect this recipe exists to remove. Upstream
 installs WordPress at build time with `DB_PASS=turnkey` and
@@ -111,9 +113,11 @@ installs with no dialog at all; `wp-config.php` carries the declared
 password never appears in any command the hook runs, and the one that does
 carry a `--admin_password` carries a throwaway; the declared password is set
 and then *authenticated against the site*, with a wrong one required to fail; a
-headless boot with nothing declared fails naming the two fields to declare
-rather than installing something; a database that refuses the declared password
-is reported as `35mysqlpass`'s failure and not as this hook's; an already
+headless boot with nothing declared defers, writes nothing, leaves the site
+at 503 and names the two fields to declare, rather than installing something;
+the database account gets the declared password from this hook, on standard
+input and never on a command line, also on the keel-init path where the conf
+is empty; a database that refuses the declared password is fatal; an already
 installed site is left alone; and the log says how long each password was and
 never what it was.
 

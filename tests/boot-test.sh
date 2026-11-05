@@ -9,9 +9,10 @@
 #
 #   1. the site answers 200 over IPv6 on port 80 and on port 443
 #   2. the page is a WordPress site and not the WordPress installer, nginx
-#      serves it (no Apache in the image), the check page of lnmp answers, a
-#      pretty permalink and the REST API work, and wp-config.php, PHP in the
-#      uploads and the PHP files of wp-includes and hidden files are refused
+#      serves it (no Apache in the image), the check page of lnmp is not
+#      there (/keel-check/ is a 404 of WordPress), a pretty permalink and the
+#      REST API work, and wp-config.php, PHP in the uploads and the PHP files
+#      of wp-includes and hidden files are refused
 #   3. wp-config.php names the local database, the appliance's own account and
 #      the password the instance description declared, and none of upstream's
 #      build time values
@@ -20,8 +21,9 @@
 #   5. the administrator logs in over HTTP with the declared app_password and
 #      is given a session cookie, a wrong password is refused, and the
 #      dashboard comes back for the session
-#   6. the image carries none of the build time files of the recipe, and the
-#      apt sources of the archive are enabled and signed (the files only: the
+#   6. the image carries none of the build time files of the recipe and
+#      nothing of the stack check of lnmp (its hook, route, page and
+#      database keel_check), and the apt sources of the archive are enabled and signed (the files only: the
 #      runner of the image gate has no route to the archive, and the update
 #      path is the business of the boot test of Core)
 #   7. keel diff reports no drift between the spec and the machine
@@ -155,14 +157,15 @@ bt_http_verdict 80 "$code80" "$(bt_page_title "$plain")"
 bt_installer_verdict "$page"
 
 # 7b. nginx, and what it does with the routes of the site: the check page of
-#     the lnmp layer is still there, a pretty permalink reaches WordPress
-#     through try_files, the REST API answers, and the three refusals of the
+#     the lnmp layer is gone (this layer removes it, so WordPress answers the
+#     URL with its 404), a pretty permalink reaches WordPress through
+#     try_files, the REST API answers, and the three refusals of the
 #     hardening hold. Each is a request and its status.
 bt_no_apache_verdict "$BT_ROOTFS"
 route_code() {
     curl -6 -k -sS -o /dev/null -w '%{http_code}' "https://[$addr]$1" 2>/dev/null || true
 }
-bt_status_verdict "/keel-check/" 200 "$(route_code /keel-check/)"
+bt_status_verdict "/keel-check/ (no check page)" 404 "$(route_code /keel-check/)"
 bt_status_verdict "/hello-world/ (pretty permalink)" 200 "$(route_code /hello-world/)"
 bt_status_verdict "/wp-json/ (REST API)" 200 "$(route_code /wp-json/)"
 bt_status_verdict "/wp-config.php" 403 "$(route_code /wp-config.php)"
@@ -240,8 +243,10 @@ rm -f "$passfile" "$container_dir/bad_password"
 #     the files the build used is in the image. The proofs that ask the archive
 #     over the network (the update, the pin, a download, a reinstall) are
 #     not here: the runner of the image gate has no route to the archive, and
-#     the update path is the business of the boot test of Core.
+#     the update path is the business of the boot test of Core. The stack
+#     check of lnmp is not in the image either.
 bt_build_leftovers_verdict "$BT_ROOTFS"
+bt_no_stack_check_verdict "$BT_ROOTFS"
 bt_sources_verdict "$BT_ROOTFS/$BT_SOURCES"
 
 # 12. No drift between the declared spec and the booted root.

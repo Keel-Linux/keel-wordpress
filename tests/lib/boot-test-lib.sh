@@ -543,6 +543,26 @@ bt_build_leftovers_verdict() {
     echo "boot-test: no build time package source, archive copy or staging keyring in the image"
 }
 
+bt_no_stack_check_verdict() {
+    # bt_no_stack_check_verdict ROOTFS: the booted image has nothing of the
+    # stack check of lnmp: not its first boot hook, its route, its page or
+    # the database keel_check that the hook made. A WordPress product ships
+    # no test database and no page that shows the stack; conf.d/main
+    # removes them.
+    local rootfs=$1 path found=0
+    for path in usr/lib/inithooks/firstboot.d/40lnmp-check \
+            etc/nginx/keel-default.d/50-keel-lnmp.conf \
+            usr/share/keel-lnmp/www \
+            var/lib/mysql/keel_check; do
+        if [ -e "$rootfs/$path" ]; then
+            echo "boot-test: the image carries /$path of the stack check of lnmp" >&2
+            found=1
+        fi
+    done
+    [ "$found" -eq 0 ] || return 1
+    echo "boot-test: no stack check page and no test database in the image"
+}
+
 bt_word_in() {
     # bt_word_in LIST WORD: WORD is one of the words of LIST.
     [[ " $1 " == *" $2 "* ]]

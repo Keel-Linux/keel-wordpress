@@ -172,6 +172,40 @@ setup() {
     [[ "$output" == *"mariadb.socket is not masked"* ]]
 }
 
+# The stack check of lnmp: a hook that makes the database keel_check at the
+# first boot, and the page /keel-check/ that reads it. A WordPress product
+# ships no test database and no check page: conf.d/main removes them.
+
+@test "the first boot hook of lnmp's check page in the image fails the build" {
+    mkdir -p "$T/usr/lib/inithooks/firstboot.d"
+    : > "$T/usr/lib/inithooks/firstboot.d/40lnmp-check"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/usr/lib/inithooks/firstboot.d/40lnmp-check is in the image"* ]]
+}
+
+@test "the route of lnmp's check page in the image fails the build" {
+    : > "$T/etc/nginx/keel-default.d/50-keel-lnmp.conf"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/etc/nginx/keel-default.d/50-keel-lnmp.conf is in the image"* ]]
+}
+
+@test "the page of lnmp's check in the image fails the build" {
+    mkdir -p "$T/usr/share/keel-lnmp/www/keel-check"
+    : > "$T/usr/share/keel-lnmp/www/keel-check/index.php"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/usr/share/keel-lnmp/www is in the image"* ]]
+}
+
+@test "a database keel_check in the data directory fails the build" {
+    mkdir -p "$T/var/lib/mysql/keel_check"
+    run "$CHECK"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/var/lib/mysql/keel_check is in the image"* ]]
+}
+
 @test "a missing cron job fails the build" {
     rm "$T/etc/cron.d/wordpress-cron"
     run "$CHECK"

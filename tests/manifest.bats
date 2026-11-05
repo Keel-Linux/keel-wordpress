@@ -121,3 +121,44 @@ d = yaml.safe_load(open(sys.argv[1]))
 sys.exit(0 if (d.get("overlays") or {}).get("syncthing") in ("enabled", "disabled") else 1)' "$REPO/tests/instance.yaml"
     [ "$status" -eq 0 ]
 }
+
+# The two examples had the same gap: keel 0.23.82 refused both with
+# "overlays.syncthing: not declared in the spec" (BR2, 2026-11-05). keel spec
+# validate takes the default of the manifest and does not see it; keel spec
+# apply does.
+@test "manifest: the simple example declares syncthing disabled, the pair example enabled" {
+    run python3 -c 'import sys, yaml
+simple = yaml.safe_load(open(sys.argv[1]))["overlays"]
+pair = yaml.safe_load(open(sys.argv[2]))["overlays"]
+assert simple.get("syncthing") == "disabled", simple
+assert pair.get("syncthing") == "enabled", pair
+assert pair.get("wireguard") == "enabled", "syncthing requires wireguard"' \
+        "$REPO/keel/instance.example.yaml" "$REPO/keel/instance.pair.example.yaml"
+    echo "$output"
+    [ "$status" -eq 0 ]
+}
+
+@test "manifest: keel spec apply would take every spec of this repository (overlays.syncthing written out)" {
+    [ -n "${KEEL_SRC:-}" ] || skip "KEEL_SRC is not set"
+    run "$REPO/tests/lib/manifest-root.sh" "$BATS_TEST_TMPDIR/root" "$MANIFEST"
+    [ "$status" -eq 0 ]
+    run env PYTHONPATH="$KEEL_SRC" python3 - "$BATS_TEST_TMPDIR/root" \
+        "$REPO/keel/instance.example.yaml" "$REPO/keel/instance.pair.example.yaml" \
+        "$REPO/tests/instance.yaml" <<'PY'
+import sys, yaml
+from keel.manifest.facts import gather
+from keel.system.filesync import undeclared_problem
+root = sys.argv[1]
+problems = gather(root, "wordpress").problems
+assert not problems, problems
+failed = 0
+for path in sys.argv[2:]:
+    problem = undeclared_problem(root, yaml.safe_load(open(path)))
+    if problem:
+        print(f"{path}: {problem}")
+        failed = 1
+sys.exit(failed)
+PY
+    echo "$output"
+    [ "$status" -eq 0 ]
+}
