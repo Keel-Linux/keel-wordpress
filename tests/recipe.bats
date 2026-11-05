@@ -105,6 +105,13 @@ code() {
         | grep -qF '/usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now'
 }
 
+@test "recipe: the cron job waits for the mark of a ready site" {
+    job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
+    [[ "$job" == *"www-data [ -e /var/www/.keel-wordpress-ready ] && ["* ]]
+    grep -qx 'WORDPRESS_READY="${WORDPRESS_READY:-/var/www/.keel-wordpress-ready}"' \
+        "$REPO/overlay/usr/lib/inithooks/lib/wordpress.sh"
+}
+
 @test "recipe: the cron job does nothing on a read-only server and runs when the server cannot be asked" {
     job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
     [[ "$job" == *"SELECT @@global.read_only"* ]]

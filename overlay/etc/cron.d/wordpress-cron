@@ -7,5 +7,11 @@
 # A replica is read-only and every event would fail to record that it ran,
 # so the job does nothing while the server says it is read-only. If the
 # server cannot be asked, the job runs and wp-cli reports the real error.
+#
+# Before the first boot or keel-init has completed the site, there is no
+# wp-config.php and every run mailed root "'wp-config.php' not found" (BR1,
+# 2026-11-05, a machine that waited for keel-init). The job waits for the
+# mark 40wordpress writes when the site is ready (WORDPRESS_READY of
+# lib/wordpress.sh).
 MAILTO=root
-*/5 * * * * www-data [ "$(/usr/bin/mysql --batch --skip-column-names --execute='SELECT @@global.read_only' 2>/dev/null)" != 1 ] && /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now --quiet
+*/5 * * * * www-data [ -e /var/www/.keel-wordpress-ready ] && [ "$(/usr/bin/mysql --batch --skip-column-names --execute='SELECT @@global.read_only' 2>/dev/null)" != 1 ] && /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now --quiet
