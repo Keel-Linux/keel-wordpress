@@ -1,3 +1,12 @@
+keel-wordpress-19.0 (13) keel; urgency=medium
+
+  * The cron job of WordPress waits for the mark of a ready site. Before
+    keel-init completed the site there was no wp-config.php, and each run
+    mailed root "'wp-config.php' not found" (BR1, 2026-11-05, the
+    commissioning test as an operator).
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Thu, 05 Nov 2026 20:06:30 +0000
+
 keel-wordpress-19.0 (12) keel; urgency=medium
 
   * Defects of the first boot, found by a test as an operator on a Proxmox
@@ -10,9 +19,6 @@ keel-wordpress-19.0 (12) keel; urgency=medium
     database" and the site stayed at 503. The statements go to mysql on
     standard input, never on a command line. A description that declares
     secrets.db_password and app.options.db_user: wordpress works as before.
-  * The cron job of WordPress waits for the mark of a ready site. Before
-    keel-init completed the site there was no wp-config.php, and each run
-    mailed root "'wp-config.php' not found" (BR1, 2026-11-05).
   * A headless first boot that does not declare the two passwords defers
     40wordpress instead of a failure. The hook uses the rule of inithooks
     (lib/console.sh), as 35mysqlpass does: tty1 of an LXC container is a
