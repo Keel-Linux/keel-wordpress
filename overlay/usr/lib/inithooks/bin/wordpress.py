@@ -1,16 +1,17 @@
 #!/usr/bin/python3
 """Ask for the WordPress values that the inithooks conf did not provide.
 
-Called by firstboot.d/40wordpress only when a terminal is attached and a value
-is absent; prints one KEY=value line per requested name on stdout so the hook
-keeps the decisions and this file keeps the dialogs. On a headless first boot
-the hook fails instead of calling this, because the values it needs are
-declared: secrets.app_password and secrets.db_password of the instance
-description.
+Called by firstboot.d/40wordpress only when somebody can answer the console
+(inithooks' lib/console.sh) and a value is absent; prints one KEY=value line
+per requested name on stdout so the hook keeps the decisions and this file
+keeps the dialogs. On a headless first boot the hook does not call this: it
+defers, and keel-init asks the values at the first login, unless the
+instance description declares secrets.app_password and secrets.db_password.
 
 Syntax: wordpress.py NAME [NAME ...]     NAME is APP_PASS or DB_PASS
 """
 
+import fcntl
 import os
 import sys
 
@@ -42,12 +43,44 @@ def ask(name: str, dialog: Dialog) -> str:
 
 
 def terminal_path(tty: str = TTY) -> str:
-    """The terminal to draw on: the one the hook checked on standard input,
-    else the controlling terminal"""
+    """The path of the terminal on standard input, else the controlling
+    terminal"""
     try:
         return os.ttyname(sys.stdin.fileno())
     except OSError:
         return tty
+
+
+def can_write(fd: int) -> bool:
+    """Whether the descriptor fd was opened for writing"""
+    try:
+        mode = fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE
+    except OSError:
+        return False
+    return mode in (os.O_WRONLY, os.O_RDWR)
+
+
+def terminal_descriptor(tty: str = TTY) -> int:
+    """A new descriptor of the terminal to draw on
+
+    First a terminal this process already holds, standard input and then
+    standard error, duplicated. Only when it holds none is a terminal
+    opened by its path. Under `pct enter` the terminal is a pty of the
+    Proxmox host, and the root of an unprivileged container cannot open
+    it again by its path: "/dev/pts/3: Permission denied" (BR2,
+    2026-11-05). The descriptor it inherited works.
+    """
+    for fd in (sys.stdin.fileno(), sys.stderr.fileno()):
+        if os.isatty(fd) and can_write(fd):
+            return os.dup(fd)
+    path = terminal_path(tty)
+    try:
+        return os.open(path, os.O_WRONLY)
+    except OSError as e:
+        raise SystemExit(
+            f"wordpress.py: no terminal to draw the dialog on ({path}:"
+            f" {e.strerror}); declare secrets.app_password and"
+            " secrets.db_password in the instance description instead")
 
 
 def answers_out(tty: str = TTY):
@@ -60,14 +93,7 @@ def answers_out(tty: str = TTY):
     the pipe is kept on a new descriptor for the KEY=value lines, and
     standard output, which dialog inherits, becomes the terminal.
     """
-    path = terminal_path(tty)
-    try:
-        terminal = os.open(path, os.O_WRONLY)
-    except OSError as e:
-        raise SystemExit(
-            f"wordpress.py: no terminal to draw the dialog on ({path}:"
-            f" {e.strerror}); declare secrets.app_password and"
-            " secrets.db_password in the instance description instead")
+    terminal = terminal_descriptor(tty)
     answers = os.fdopen(os.dup(sys.stdout.fileno()), "w")
     os.dup2(terminal, sys.stdout.fileno())
     os.close(terminal)

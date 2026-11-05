@@ -7,8 +7,8 @@
 # keel repository is the table that maps a spec field to a variable):
 #
 #   secrets.db_password    -> DB_PASS         the database account's password,
-#                                             already given to the database by
-#                                             the parent layer's 35mysqlpass
+#                                             which this hook gives to the
+#                                             account (see below)
 #   secrets.app_password   -> APP_PASS        the WordPress administrator
 #   app.options.admin_user -> APP_ADMIN_USER  that administrator's login
 #   app.options.site_title -> APP_SITE_TITLE  the site title
@@ -18,9 +18,24 @@
 #                                             field the parent layer reads
 #   app.options.db_name    -> APP_DB_NAME     the database
 #
-# Runs at 40, after 35mysqlpass of the parent layer, which starts the database
-# and sets that account's password, and after 15regen-sslcert, which replaces
-# the certificate nginx serves on 443.
+# Runs at 40, after 35mysqlpass of the parent layer and after 15regen-sslcert,
+# which replaces the certificate nginx serves on 443.
+#
+# This hook owns its database account. On a primary or a standalone node it
+# gives the account DB_PASS through the root socket, and creates the account
+# when the image does not have it. 35mysqlpass sets the password of the
+# account that APP_DB_USER names, and under keel-init the inithooks conf is
+# empty (98finalize blanked it): 35mysqlpass then sets its own account
+# 'admin', and this account kept the password of no input (BR2, 2026-11-05).
+# A description that names wordpress in app.options.db_user gives the same
+# password to the same account twice, which changes nothing.
+#
+# Whether anybody can answer the dialog is inithooks' rule, lib/console.sh,
+# as for 35mysqlpass. A test of standard input for a terminal is not
+# enough: tty1 of an LXC container is a terminal nobody is attached to. When
+# nobody can answer and a password is not declared, the hook asks nothing,
+# records that it is deferred and finishes. Nothing is written, the ready
+# marker is not, and the site answers 503 until keel-init completes it.
 #
 # A replica gets wp-config.php and nothing else. The spec that declares
 # database.server.role: replica, or a server that is read only, says the
@@ -44,6 +59,8 @@ INITHOOKS_DEFAULT="${INITHOOKS_DEFAULT:-/etc/default/inithooks}"
 source "$INITHOOKS_DEFAULT"
 # shellcheck source=../lib/wordpress.sh
 source "$INITHOOKS_PATH/lib/wordpress.sh"
+# shellcheck source=/usr/lib/inithooks/lib/console.sh
+source "$INITHOOKS_PATH/lib/console.sh"
 
 fatal() { echo "fatal [40wordpress]: $*" >&2; exit 1; }
 
@@ -70,11 +87,27 @@ db_prefix=$(wordpress_db_prefix "${APP_DB_PREFIX-}") \
 role=$(wordpress_spec_role "$WORDPRESS_SPEC") \
     || fatal "cannot read database.server.role from $WORDPRESS_SPEC: a node that may be a replica writes nothing until it can"
 
+# deferred WHAT: the one line of a hook that asks nothing, through the rule
+# of inithooks. console_deferred also records the hook, so that the first
+# login starts keel-init, which asks the values at a console. An inithooks
+# without it has console_skipped, which writes the line only.
+deferred() {
+    if declare -F console_deferred > /dev/null; then
+        console_deferred 40wordpress "$1"
+    else
+        console_skipped 40wordpress "$1"
+    fi
+}
+
 mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}" "$role")
 if [[ ${#missing[@]} -gt 0 ]]; then
-    [[ -t 0 ]] || fatal "no ${missing[*]} in $INITHOOKS_CONF and no terminal to" \
-        "ask on: declare secrets.app_password and secrets.db_password in the" \
-        "instance description"
+    if console_unattended; then
+        why="no ${missing[*]} in $INITHOOKS_CONF: WordPress stays not installed"
+        why+=" and the site answers 503; declare secrets.app_password and"
+        why+=" secrets.db_password in the instance description, or keel-init asks them"
+        deferred "$why"
+        exit 0
+    fi
     while IFS='=' read -r key value; do
         [[ -n "$key" ]] && declare "$key=$value"
     done < <("$INITHOOKS_PATH/bin/wordpress.py" "${missing[@]}")
@@ -82,9 +115,8 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     [[ -n "${APP_PASS-}" || "$role" == replica ]] || fatal "no password given"
 fi
 
-# The database. 35mysqlpass started it and gave this account its password; do
-# not assume either, because a hook that assumes reports somebody else's
-# failure as its own.
+# The database. 35mysqlpass may have started it already; do not assume it,
+# because a hook that assumes reports somebody else's failure as its own.
 systemctl start "$WORDPRESS_DB_SERVICE.service"
 wordpress_wait_ready "mysqladmin ping" "$WORDPRESS_WAIT_TRIES" \
     || fatal "$WORDPRESS_DB_SERVICE did not answer after $WORDPRESS_WAIT_TRIES tries"
@@ -157,10 +189,19 @@ if [[ "$replica" == true ]]; then
     exit 0
 fi
 
-# The schema, made here and not in the image (see the top of this file), and
-# then the account is asked whether it reaches it.
+# The schema, made here and not in the image (see the top of this file); then
+# the account gets its password and the schema, and is asked whether it
+# reaches it. The statements of the account hold DB_PASS, so they go to the
+# client on standard input (printf is a builtin: no argument of a process),
+# and they are made first, so that a statement that cannot be made stops
+# the hook instead of an empty input that mysql would accept.
 mysql --batch --execute="$(wordpress_create_database_sql "$db_name")" \
     || fatal "cannot create the database '$db_name' on $WORDPRESS_DB_SERVICE"
+account_sql=$(wordpress_account_sql "$db_user" "$DB_PASS") \
+    || fatal "cannot build the statements of the account '$db_user'"
+printf '%s\n' "$account_sql" | mysql --batch \
+    || fatal "cannot give '$db_user' its password on $WORDPRESS_DB_SERVICE"
+unset account_sql
 mysql --batch --execute="$(wordpress_grant_sql "$db_name" "$db_user")" \
     || fatal "cannot grant '$db_user' the database '$db_name' on $WORDPRESS_DB_SERVICE"
 MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
@@ -168,7 +209,7 @@ MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
     --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
     | grep -qx 1 \
     || fatal "'$db_user' cannot reach the database '$db_name' on [::1]:3306 with" \
-        "the declared secrets.db_password: see 35mysqlpass above"
+        "the declared secrets.db_password"
 
 write_config
 ensure_replicated_dirs

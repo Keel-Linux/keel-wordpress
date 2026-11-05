@@ -24,9 +24,13 @@ at() {
     route | grep -nF -- "$1" | head -1 | cut -d: -f1
 }
 
-@test "route: the file is in keel-web's include directory, after the check page" {
+@test "route: the file is in keel-web's include directory, after the files of the stack" {
     [ -f "$ROUTE" ]
     [ "$(basename "$ROUTE")" \> "50-keel-lnmp.conf" ]
+}
+
+@test "route: it does not depend on the check page of lnmp, which this layer removes" {
+    run ! grep -qE '^[^#]*keel-check' "$ROUTE"
 }
 
 @test "route: it is no server and listens on nothing" {

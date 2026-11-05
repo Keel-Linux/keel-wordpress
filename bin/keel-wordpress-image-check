@@ -14,6 +14,8 @@
 #   local database on a node that becomes a replica, and keel refuses to
 #   replace it without --destroy-local-database. The first boot of a
 #   primary makes it (firstboot.d/40wordpress).
+# - Nothing of the stack check of lnmp: not its first boot hook, its route,
+#   its page or its database keel_check.
 # - The route and the manifest in place, with lnmp's beside it, and no
 #   manifest of a database layer: two manifests that no other is built on
 #   leave keel inspect unable to name the appliance.
@@ -84,6 +86,19 @@ for path in /etc/nginx/keel-default.d/60-keel-wordpress.conf \
         /usr/share/keel/appliances/lnmp.yaml; do
     if [ ! -f "$root$path" ]; then
         fatal "$path is not in the image"
+    fi
+done
+
+# The stack check of lnmp is not part of a WordPress product: no test
+# database, no page that shows the stack. conf.d/main removes the hook, the
+# route and the page; the build of the deck records each removal, and keel
+# assemble removes the path from the image (docs/layers.md of keel).
+for path in /usr/lib/inithooks/firstboot.d/40lnmp-check \
+        /etc/nginx/keel-default.d/50-keel-lnmp.conf \
+        /usr/share/keel-lnmp/www \
+        /var/lib/mysql/keel_check; do
+    if [ -e "$root$path" ]; then
+        fatal "$path is in the image: a WordPress product ships no stack check page and no test database"
     fi
 done
 

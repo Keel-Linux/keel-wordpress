@@ -1,3 +1,39 @@
+keel-wordpress-19.0 (12) keel; urgency=medium
+
+  * Defects of the first boot, found by a test as an operator on a Proxmox
+    LXC on BR2 (2026-11-05, inithooks 2.3.6+keel35, keel 0.23.82):
+  * firstboot.d/40wordpress gives its database account the password, on a
+    primary or a standalone node, through the root socket, and creates the
+    account when the image does not have it. Under keel-init the inithooks
+    conf is empty, so lnmp's 35mysqlpass set the account 'admin' and not
+    'wordpress': the hook stopped with "'wordpress' cannot reach the
+    database" and the site stayed at 503. The statements go to mysql on
+    standard input, never on a command line. A description that declares
+    secrets.db_password and app.options.db_user: wordpress works as before.
+  * A headless first boot that does not declare the two passwords defers
+    40wordpress instead of a failure. The hook uses the rule of inithooks
+    (lib/console.sh), as 35mysqlpass does: tty1 of an LXC container is a
+    terminal that nobody is attached to. It records the deferral with
+    console_deferred when inithooks has it (else console_skipped), so the
+    first login starts keel-init. The site answers 503 until keel-init
+    completes the installation.
+  * bin/wordpress.py duplicates the terminal it already holds (standard
+    input, else standard error) and opens a terminal by its path only when
+    it holds none. Under pct enter the terminal is a pty of the host, and
+    the root of an unprivileged container cannot open it again:
+    "/dev/pts/3: Permission denied".
+  * The image does not ship the stack check of lnmp. conf.d/main removes
+    the first boot hook 40lnmp-check (which made the test database
+    keel_check), the route 50-keel-lnmp.conf and the page /keel-check/.
+    The confconsole screen does not show the check page. The image check
+    and the boot test prove that none is left.
+  * keel/instance.example.yaml declares overlays.syncthing: disabled, and
+    keel/instance.pair.example.yaml declares overlays.syncthing: enabled.
+    keel 0.23.82 refused both: "overlays.syncthing: not declared in the
+    spec".
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Thu, 05 Nov 2026 12:00:00 +0000
+
 keel-wordpress-19.0 (11) keel; urgency=medium
 
   * The image ships wp-content/languages, owned by the web user like

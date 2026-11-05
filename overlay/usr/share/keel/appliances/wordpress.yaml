@@ -10,7 +10,7 @@ base: lnmp
 # too (the option db_user and the secret db_password, whose names are unique
 # across the chain): an instance description of this appliance sets db_user
 # to wordpress, the account that the layer ships with no password and that
-# firstboot.d/35mysqlpass gives the declared one. The administrator's
+# firstboot.d/40wordpress gives the declared one. The administrator's
 # password is secrets.app_password, a name of the spec itself.
 # state: the directories WordPress writes at run time (0050's amendment of
 # 2026-10-20, item 2, and its note of 2026-10-24: uploads, themes, plugins

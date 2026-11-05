@@ -589,6 +589,33 @@ EOF
     [ "$(grep -c 'still carries the build time' <<< "$output")" -eq 3 ]
 }
 
+# The stack check of lnmp: this layer removes its hook, its route and its
+# page, so a booted WordPress has no database keel_check either.
+
+@test "no_stack_check_verdict passes on a booted image with none of the stack check" {
+    mkdir -p "$S/rootfs/var/lib/mysql/wordpress"
+    run bt_no_stack_check_verdict "$S/rootfs"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no stack check page and no test database"* ]]
+}
+
+@test "no_stack_check_verdict names each part of the stack check the image kept" {
+    install -D /dev/null "$S/rootfs/usr/lib/inithooks/firstboot.d/40lnmp-check"
+    install -D /dev/null "$S/rootfs/etc/nginx/keel-default.d/50-keel-lnmp.conf"
+    install -D /dev/null "$S/rootfs/usr/share/keel-lnmp/www/keel-check/index.php"
+    mkdir -p "$S/rootfs/var/lib/mysql/keel_check"
+    run bt_no_stack_check_verdict "$S/rootfs"
+    [ "$status" -eq 1 ]
+    [ "$(grep -c 'of the stack check of lnmp' <<< "$output")" -eq 4 ]
+    [[ "$output" == *"/var/lib/mysql/keel_check"* ]]
+    [[ "$output" == *"/usr/lib/inithooks/firstboot.d/40lnmp-check"* ]]
+}
+
+@test "the boot test asks /keel-check/ and wants the 404 of WordPress, and checks the rootfs" {
+    grep -qF 'bt_status_verdict "/keel-check/ (no check page)" 404' "$BATS_TEST_DIRNAME/boot-test.sh"
+    grep -qF 'bt_no_stack_check_verdict "$BT_ROOTFS"' "$BATS_TEST_DIRNAME/boot-test.sh"
+}
+
 @test "sources_verdict refuses a disabled source, a staging suite, another archive and another keyring" {
     _sources https://archive.keellinux.org trixie no
     run bt_sources_verdict "$S/keel.sources"

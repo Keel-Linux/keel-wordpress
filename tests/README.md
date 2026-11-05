@@ -28,12 +28,14 @@ the spec.
 - `dialog.bats`: `overlay/usr/lib/inithooks/bin/wordpress.py` run as the hook
   runs it, output redirected, inside a pseudo terminal (`script`), with a
   stand-in for libinithooks whose dialog refuses to draw anywhere but a
-  terminal: the answers go to the hook and the box to the screen.
+  terminal: the answers go to the hook and the box to the screen. With every
+  open by path refused, as under `pct enter`, the script duplicates the
+  terminal on standard input or standard error.
 - `hook.bats`: the hook itself, executed for real against scratch directories
   with `systemctl`, `mysqladmin`, `mysql`, `php`, `wp`, `chown` and `openssl`
   as `PATH` stubs that log every call, and a scratch `INITHOOKS_PATH` whose
-  `lib` is a symlink to the real library, so kcov measures the file the
-  appliance ships.
+  `lib` holds a symlink to each real file of the library, so kcov measures the
+  file the appliance ships, and a stand-in for inithooks' `lib/console.sh`.
 - `wrappers.bats`: unit tests of the two operator commands this overlay
   writes, `overlay/usr/local/bin/keel-wp` and
   `overlay/usr/local/sbin/keel-wordpress-update`, and of the `turnkey-wp` and
@@ -49,7 +51,9 @@ the spec.
 - `apt-files.bats`: the recipe ships no apt source and no pin, and the project
   packages are upgraded from the Keel archive and then proved to be its
   candidates.
-- `image-check.bats`: `bin/keel-wordpress-image-check` against a scratch tree.
+- `image-check.bats`: `bin/keel-wordpress-image-check` against a scratch tree,
+  which includes that nothing of the stack check of lnmp (its hook, route,
+  page and database `keel_check`) is in the image.
 - `recipe.bats`: the plan, the Makefile, the conf script, the cron job and the
   changelog. Nothing of Apache is in them.
 - `nginx.bats`: the route of the site, `60-keel-wordpress.conf`: the refusals,
@@ -117,8 +121,8 @@ What it proves, in order:
    `etc/keel/instance.yaml` and `etc/inithooks.yaml`.
 4. Renders the spec into the rootfs `etc/inithooks.conf` with `keel spec
    apply`, from a copy whose secret references point inside the rootfs. Without
-   the conf the first boot is not headless: `30rootpass`, `35mysqlpass` and
-   `40wordpress` open a dialog and wait forever.
+   the conf the first boot has nothing to install with: `35mysqlpass` and
+   `40wordpress` defer to keel-init, and the site answers 503.
 5. Writes an LXC config for that rootfs on the bridge and starts the container.
 6. Waits for a global IPv6 address (`lxc-info -i`), then for the first boot to
    finish: `RUN_FIRSTBOOT=false` in the rootfs copy of

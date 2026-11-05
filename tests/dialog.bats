@@ -54,6 +54,92 @@ DB_PASS=typed-at-the-console" ]
     [[ "$output" != *"Traceback"* ]]
 }
 
+# Under `pct enter` the terminal is a pty of the Proxmox host (/dev/pts/3).
+# The root of an unprivileged container cannot open it again by its path:
+# "/dev/pts/3: Permission denied" (BR2, 2026-11-05). The process already
+# holds that terminal on its descriptors, so the script duplicates one of
+# them and opens a path only when it has none. Here every open by path is
+# refused, as there.
+
+# run_without_open REDIRECTIONS: answers_out() with os.open refused, in a
+# pty, with the descriptors REDIRECTIONS gives; stdout is a file, as in the
+# hook, and it receives the answer and whether stdout became the terminal
+run_without_open() {
+    cat > "$BATS_TEST_TMPDIR/no-open.py" << 'EOF2'
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("wordpress", sys.argv[1])
+wordpress = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(wordpress)
+
+
+def refused(path, *args, **kwargs):
+    raise PermissionError(13, "Permission denied", path)
+
+
+os.open = refused
+answers = wordpress.answers_out()
+print(f"answer, terminal on stdout: {os.isatty(1)}", file=answers)
+answers.close()
+EOF2
+    script -qec "PYTHONPATH='$FAKE' python3 '$BATS_TEST_TMPDIR/no-open.py' '$WORDPRESS' $1 > '$OUT'" /dev/null
+}
+
+@test "a terminal on standard input is duplicated, not opened again by its path" {
+    # standard error is a file, so only standard input is a terminal
+    run run_without_open "2> '$BATS_TEST_TMPDIR/stderr'"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT")" = "answer, terminal on stdout: True" ]
+}
+
+@test "with no terminal on standard input, the one on standard error is duplicated" {
+    run run_without_open "< /dev/null"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT")" = "answer, terminal on stdout: True" ]
+}
+
+@test "a terminal open for reading only is not one to draw on" {
+    # the shell opens /dev/tty for reading only with <: the dialog cannot
+    # draw there, so standard error is the one duplicated
+    run run_without_open "< /dev/tty"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT")" = "answer, terminal on stdout: True" ]
+    # and with standard error a file, there is no terminal to draw on
+    run run_without_open "< /dev/tty 2> '$BATS_TEST_TMPDIR/stderr'"
+    [ "$status" -ne 0 ]
+    grep -q "no terminal to draw the dialog on" "$BATS_TEST_TMPDIR/stderr"
+}
+
+@test "with no terminal on a descriptor and none to open, it says so" {
+    run run_without_open "< /dev/null 2> '$BATS_TEST_TMPDIR/stderr'"
+    [ "$status" -ne 0 ]
+    grep -q "no terminal to draw the dialog on" "$BATS_TEST_TMPDIR/stderr"
+    run grep -c Traceback "$BATS_TEST_TMPDIR/stderr"
+    [ "$output" = 0 ]
+}
+
+@test "the whole dialog runs under a pty it cannot open again by its path" {
+    cat > "$BATS_TEST_TMPDIR/no-open-main.py" << 'EOF'
+import os
+import runpy
+import sys
+
+
+def refused(path, *args, **kwargs):
+    raise PermissionError(13, "Permission denied", path)
+
+
+os.open = refused
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+EOF
+    run script -qec "PYTHONPATH='$FAKE' python3 '$BATS_TEST_TMPDIR/no-open-main.py' '$WORDPRESS' DB_PASS > '$OUT'" /dev/null
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT")" = "DB_PASS=typed-at-the-console" ]
+}
+
 @test "without a name it prints its usage and fails" {
     PYTHONPATH="$FAKE" run python3 "$WORDPRESS"
     [ "$status" -eq 1 ]

@@ -13,9 +13,10 @@ WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/wordpress}"
 WORDPRESS_CONFIG="${WORDPRESS_CONFIG:-$WORDPRESS_ROOT/wp-config.php}"
 WORDPRESS_WEB_USER="${WORDPRESS_WEB_USER:-www-data}"
 # The database this appliance owns, and the account that reaches it. The
-# account is the one conf.d/main creates unusable and the one the parent
-# layer's firstboot.d/35mysqlpass gives the declared password to, which is
-# why app.options.db_user of the instance description names it for both.
+# account is the one conf.d/main creates unusable. firstboot.d/40wordpress
+# gives it the declared password (wordpress_account_sql). The parent
+# layer's 35mysqlpass reads app.options.db_user too, so a description that
+# names wordpress there gives the same password to the same account twice.
 WORDPRESS_DB_NAME="${WORDPRESS_DB_NAME:-wordpress}"
 WORDPRESS_DB_USER="${WORDPRESS_DB_USER:-wordpress}"
 WORDPRESS_DB_PREFIX="${WORDPRESS_DB_PREFIX:-wp_}"
@@ -208,6 +209,37 @@ wordpress_grant_sql() {
     wordpress_is_ident "${2-}" || return 1
     for host in localhost ::1 127.0.0.1; do
         printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%s';\n" "$1" "$2" "$host"
+    done
+}
+
+# wordpress_sql_string VALUE: VALUE as a single quoted SQL string literal.
+# With backslash escapes on (wordpress_account_sql sets them for its
+# session), only a backslash and a single quote mean anything inside one.
+wordpress_sql_string() {
+    local value=${1-}
+    value=${value//\\/\\\\}
+    value=${value//\'/\\\'}
+    printf "'%s'" "$value"
+}
+
+# wordpress_account_sql USER PASS: the statements that give the database
+# account its password on each host the image created it for, and create
+# the account when the image did not (an app.options.db_user of another
+# name). The first boot hook owns this account: under keel-init the
+# inithooks conf is empty, so the parent layer's 35mysqlpass gives its
+# password to its own account 'admin' and not to this one. The hook sends
+# these statements to mysql on standard input, never as an argument, as
+# PASS is in them. The session mode comes first, so that the server reads
+# the escapes of wordpress_sql_string as escapes.
+wordpress_account_sql() {
+    local user=${1-} pass=${2-} host quoted
+    wordpress_is_ident "$user" || return 1
+    [[ -n "$pass" ]] || return 1
+    quoted=$(wordpress_sql_string "$pass")
+    echo "SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '');"
+    for host in localhost ::1 127.0.0.1; do
+        printf "CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY %s;\n" "$user" "$host" "$quoted"
+        printf "ALTER USER '%s'@'%s' IDENTIFIED BY %s;\n" "$user" "$host" "$quoted"
     done
 }
 

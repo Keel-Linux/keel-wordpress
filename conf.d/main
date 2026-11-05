@@ -2,7 +2,8 @@
 # WordPress under /var/www/wordpress, nginx serving it on both ports through
 # PHP-FPM, and a database account that waits for a password nobody has chosen
 # yet. The layer is built on lnmp (handbook decision 0059): nginx, PHP-FPM and
-# MariaDB, the hooks of the database and the check page are the parent's.
+# MariaDB, and the hooks of the database are the parent's. The check page of
+# the parent is not part of this product: this script removes it.
 #
 # What this script deliberately does NOT do, and what upstream's does: run the
 # installation. Upstream's conf.d/main creates the database user with
@@ -139,6 +140,20 @@ for runtime_dir in uploads cache upgrade upgrade-temp-backup plugins themes lang
     install -d -o "$WEB_USER" -g "$WEB_USER" -m 0755 "$WPROOT/wp-content/$runtime_dir"
     chown -R "$WEB_USER:$WEB_USER" "$WPROOT/wp-content/$runtime_dir"
 done
+
+# The stack check of lnmp is not part of a WordPress product: its first boot
+# hook makes a test database, keel_check, and its page /keel-check/ shows
+# the stack to anybody who asks. Both are the parent layer's, so they are
+# removed here. The deck build records each removal as a whiteout of this
+# layer, and keel assemble removes the path from the image (docs/layers.md
+# of keel). bin/keel-wordpress-image-check proves that none is left.
+rm -rf /usr/lib/inithooks/firstboot.d/40lnmp-check \
+    /etc/nginx/keel-default.d/50-keel-lnmp.conf \
+    /usr/share/keel-lnmp/www
+# The parent directory goes too when nothing else of lnmp is in it.
+if [ -d /usr/share/keel-lnmp ] && [ -z "$(ls -A /usr/share/keel-lnmp)" ]; then
+    rmdir /usr/share/keel-lnmp
+fi
 
 # nginx: the site is a file of keel-web's include directory. The default site
 # of Keel Web has to include that directory, or the route would be dead

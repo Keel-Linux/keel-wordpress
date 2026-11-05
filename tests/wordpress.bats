@@ -433,3 +433,50 @@ setup() {
 @test "the ready marker is a file beside the WordPress tree, not in it" {
     [[ "$WORDPRESS_READY" == /var/www/.keel-wordpress-ready ]]
 }
+
+# --- the database account (40wordpress gives it its password) ----------------
+# The hook gives the account its password through the root socket, on a
+# primary or a standalone node. Under keel-init the inithooks conf is empty,
+# so lnmp's 35mysqlpass sets its own account 'admin' and not this one.
+
+@test "sql_string quotes a value as a SQL string literal" {
+    run wordpress_sql_string 'plain'
+    [ "$status" -eq 0 ]
+    [ "$output" = "'plain'" ]
+}
+
+@test "sql_string escapes a backslash and a single quote, and nothing else" {
+    run wordpress_sql_string "a'b\\c\"d%e_f"
+    [ "$status" -eq 0 ]
+    [ "$output" = "'a\\'b\\\\c\"d%e_f'" ]
+}
+
+@test "account_sql creates the account on the three hosts and sets its password" {
+    run wordpress_account_sql wp_user 's3cret'
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 7 ]
+    [ "${lines[0]}" = "SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '');" ]
+    [ "${lines[1]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'localhost' IDENTIFIED BY 's3cret';" ]
+    [ "${lines[2]}" = "ALTER USER 'wp_user'@'localhost' IDENTIFIED BY 's3cret';" ]
+    [ "${lines[3]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'::1' IDENTIFIED BY 's3cret';" ]
+    [ "${lines[4]}" = "ALTER USER 'wp_user'@'::1' IDENTIFIED BY 's3cret';" ]
+    [ "${lines[5]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'127.0.0.1' IDENTIFIED BY 's3cret';" ]
+    [ "${lines[6]}" = "ALTER USER 'wp_user'@'127.0.0.1' IDENTIFIED BY 's3cret';" ]
+}
+
+@test "account_sql escapes a password with a quote and a backslash in it" {
+    run wordpress_account_sql wp_user "it's\\x"
+    [ "$status" -eq 0 ]
+    [ "${lines[2]}" = "ALTER USER 'wp_user'@'localhost' IDENTIFIED BY 'it\\'s\\\\x';" ]
+}
+
+@test "account_sql refuses an account that would need quoting, and an empty password" {
+    run wordpress_account_sql "x'; DROP USER y; --" pass
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    run wordpress_account_sql "" pass
+    [ "$status" -ne 0 ]
+    run wordpress_account_sql wp_user ""
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
