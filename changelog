@@ -1,3 +1,25 @@
+keel-wordpress-19.0 (19) keel; urgency=medium
+
+  * The site logs in to MariaDB over the socket as www-data, the user of
+    PHP-FPM (unix_socket), with no password; wp-cli as root logs in as root
+    over the same socket. wp-config.php holds no password and no salt, and
+    40wordpress no longer asks a database password.
+  * The eight salts are options of the database: 40wordpress stores them
+    (lib/wordpress-set-salts.php) on a server that takes writes, and
+    wp_salt() reads them when wp-config.php defines none. keel 0.23.84
+    seeds the database of a cloud replica from the primary and replicates
+    it, so both nodes have one set of salts: a login of one node stays a
+    login after a failover. Each machine used to make its own salts in
+    wp-config.php, and a failover logged every user out.
+  * An existing machine keeps its wp-config.php, its password and its
+    salts: the hook does not write a wp-config.php that exists. A machine
+    whose salts change logs its users out once.
+  * The decision (2026-11-06): the values that the two nodes of a pair
+    share live in the application's database, which keel already seeds and
+    replicates; no Syncthing file, no new keel mechanism, nothing typed.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 20:30:00 +0000
+
 keel-wordpress-19.0 (18) keel; urgency=medium
 
   * The login page of the replica of a cloud pair says that the node is the

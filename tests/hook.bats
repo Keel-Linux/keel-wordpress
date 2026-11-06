@@ -76,7 +76,7 @@ case "\$*" in
         exit 0
         ;;
 esac
-case "\$*" in *--user*) [ -n "\${WP_TEST_DB_REFUSES:-}" ] && exit 1 ;; esac
+case "\$*" in *--protocol=socket*) [ -n "\${WP_TEST_DB_REFUSES:-}" ] && exit 1 ;; esac
 case "\$*" in
     *read_only*) echo \${WP_TEST_READ_ONLY:-0}; exit 0 ;;
     *"CREATE DATABASE"*) [ -n "\${WP_TEST_CREATE_FAILS:-}" ] && exit 1; exit 0 ;;
@@ -85,6 +85,14 @@ echo \${WP_TEST_DB_COUNT:-1}
 EOF
     chmod +x "$STUBS/mysql"
     _stub php 0
+    # runuser -u USER -- CMD...: log it, then run CMD
+    cat > "$STUBS/runuser" <<EOF
+#!/bin/bash
+echo "runuser \$*" >> "$CALLS"
+shift 3
+exec "\$@"
+EOF
+    chmod +x "$STUBS/runuser"
     # wp: "core is-installed" decides the branch, everything else succeeds
     # unless a test says which subcommand must fail
     cat > "$STUBS/wp" <<EOF
@@ -104,9 +112,14 @@ if [ "\$first" = core ]; then
 fi
 [ "\${WP_TEST_FAIL:-}" = "\$first" ] && exit 1
 if [ "\$first" = eval-file ]; then
-    if [ "\${WP_TEST_FAIL_EVAL:-}" = both ]; then exit 1; fi
+    if [ "\${WP_TEST_FAIL_EVAL:-}" = both ]; then
+        case "\$*" in *set-salts*) ;; *) exit 1 ;; esac
+    fi
     if [ "\${WP_TEST_FAIL_EVAL:-}" = auth ]; then
         case "\$*" in *verify-login*) exit 1 ;; esac
+    fi
+    if [ "\${WP_TEST_FAIL_EVAL:-}" = salts ]; then
+        case "\$*" in *set-salts*) exit 1 ;; esac
     fi
 fi
 exit 0
@@ -166,7 +179,6 @@ LIB
 _conf() {
     cat > "$CONF" <<EOF
 APP_PASS='declared-app-password'
-DB_PASS='declared-db-password'
 APP_ADMIN_USER='admin'
 APP_SITE_TITLE='A Keel Blog'
 APP_EMAIL='admin@example.org'
@@ -190,14 +202,38 @@ EOF
     [ "$output" = "0" ]
 }
 
-@test "wp-config.php carries the declared database password and nothing built in" {
+# The two nodes of a cloud pair share what each machine used to make
+# (decision of 2026-11-06): the site logs in over the socket with no
+# password, and the salts are options of the database, which keel seeds to
+# the replica and replicates.
+@test "wp-config.php logs in over the socket with no password and defines no salt" {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    grep -q "define('DB_PASSWORD', 'declared-db-password');" "$WPROOT/wp-config.php"
+    grep -q "define('DB_PASSWORD', '');" "$WPROOT/wp-config.php"
     grep -q "define('DB_NAME', 'wordpress');" "$WPROOT/wp-config.php"
-    grep -q "define('DB_USER', 'wordpress');" "$WPROOT/wp-config.php"
-    grep -q "define('DB_HOST', '\[::1\]');" "$WPROOT/wp-config.php"
+    grep -qF "posix_geteuid() === 0) ? 'root' : 'www-data');" "$WPROOT/wp-config.php"
+    grep -q "define('DB_HOST', 'localhost');" "$WPROOT/wp-config.php"
+    run ! grep -qE "define\('(AUTH|SECURE_AUTH|LOGGED_IN|NONCE)_(KEY|SALT)'" "$WPROOT/wp-config.php"
     run ! grep -q "turnkey" "$WPROOT/wp-config.php"
+}
+
+@test "the salts are stored in the database once the site is installed, before the password is set" {
+    run bash "$HOOK"
+    [ "$status" -eq 0 ]
+    salts=$(grep -n "wordpress-set-salts.php" "$CALLS" | head -1 | cut -d: -f1)
+    install=$(grep -n -- "core install" "$CALLS" | head -1 | cut -d: -f1)
+    password=$(grep -n "wordpress-set-password.php" "$CALLS" | head -1 | cut -d: -f1)
+    [ -n "$salts" ]
+    [ "$install" -lt "$salts" ]
+    [ "$salts" -lt "$password" ]
+}
+
+@test "salts that cannot be stored are fatal, and the site stays closed" {
+    export WP_TEST_FAIL_EVAL=salts
+    run bash "$HOOK"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cannot store the salts in the database"* ]]
+    [ ! -e "$WORDPRESS_READY" ]
 }
 
 @test "the password never reaches the command line of wp core install" {
@@ -215,7 +251,7 @@ EOF
     run bash "$HOOK"
     [ "$status" -eq 0 ]
     run grep -c -- " eval-file " "$CALLS"
-    [ "$output" = "2" ]
+    [ "$output" = "3" ]
     grep -q "wordpress-set-password.php" "$CALLS"
     grep -q "wordpress-verify-login.php" "$CALLS"
 }
@@ -346,9 +382,8 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"[40wordpress] not asked, nobody can answer (the console has no size"* ]]
     [[ "$output" == *"APP_PASS"* ]]
-    [[ "$output" == *"DB_PASS"* ]]
+    [[ "$output" != *"DB_PASS"* ]]
     [[ "$output" == *"secrets.app_password"* ]]
-    [[ "$output" == *"secrets.db_password"* ]]
     [[ "$output" == *"keel-init"* ]]
     [ "$(cat "$SCRATCH/deferred")" = 40wordpress ]
 }
@@ -375,15 +410,6 @@ EOF
     [ ! -e "$WORDPRESS_READY" ]
 }
 
-@test "a headless boot with one password declared still defers for the other" {
-    _conf "APP_PASS=''"
-    export INITHOOKS_UNATTENDED="there is no terminal"
-    run bash "$HOOK"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"no APP_PASS in"* ]]
-    [ ! -e "$WORDPRESS_READY" ]
-}
-
 @test "a description that declares everything needs nobody at the console" {
     export INITHOOKS_UNATTENDED="there is no terminal"
     run bash "$HOOK"
@@ -403,9 +429,7 @@ EOF
     run grep "wordpress.py" "$CALLS"
     [ "$status" -eq 0 ]
     [[ "$output" == *"APP_PASS"* ]]
-    [[ "$output" == *"DB_PASS"* ]]
-    # and what the dialog answered is what reached wp-config.php
-    grep -q "define('DB_PASSWORD', 'asked-DB_PASS');" "$WPROOT/wp-config.php"
+    [[ "$output" != *"DB_PASS"* ]]
 }
 
 @test "a dialog that answers nothing is fatal rather than installing without a password" {
@@ -427,7 +451,7 @@ EOF
     export INITHOOKS_UNATTENDED=no
     run bash "$HOOK" < /dev/null
     [ "$status" -eq 0 ]
-    grep -q "wordpress.py APP_PASS DB_PASS" "$CALLS"
+    grep -qx "wordpress.py APP_PASS" "$CALLS"
 }
 
 @test "a missing conf file is not fatal on its own" {
@@ -439,64 +463,52 @@ EOF
 }
 
 # --- the database account ----------------------------------------------------
-# 40wordpress gives its own account its password, through the root socket.
-# Under keel-init the inithooks conf is empty (98finalize blanked it), so
-# lnmp's 35mysqlpass sets its account 'admin' and not 'wordpress', and the
-# check below failed on BR2 (2026-11-05) with the site left at 503.
+# The site logs in over the socket as the web user, with no password
+# (unix_socket). A password made or typed on each machine is a value the two
+# nodes of a pair must agree on, and the seed of a replica copies the
+# accounts of the primary (decision of 2026-11-06).
 
-@test "the account gets the declared password on its three hosts, by standard input" {
+@test "the web user gets its socket account and the grant of the schema, by standard input" {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
-    grep -qxF "ALTER USER 'wordpress'@'::1' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
-    grep -qxF "CREATE USER IF NOT EXISTS 'wordpress'@'127.0.0.1' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
-    # never on a command line: the call log holds every argument of mysql
-    run grep -c "declared-db-password" "$CALLS"
-    [ "$output" = "0" ]
+    grep -qxF "CREATE USER IF NOT EXISTS 'www-data'@'localhost' IDENTIFIED VIA unix_socket;" "$STDIN_SQL"
+    grep -qxF "GRANT ALL PRIVILEGES ON \`wordpress\`.* TO 'www-data'@'localhost';" "$STDIN_SQL"
+    run ! grep -q "IDENTIFIED BY" "$STDIN_SQL"
 }
 
-@test "the account has its password before it is granted the schema and asked to reach it" {
+@test "the schema and the account come before the web user is asked whether it reaches the schema" {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    account=$(grep -n "^mysql --batch$" "$CALLS" | head -1 | cut -d: -f1)
-    grant=$(grep -n "GRANT ALL PRIVILEGES" "$CALLS" | head -1 | cut -d: -f1)
     create=$(grep -n "CREATE DATABASE" "$CALLS" | head -1 | cut -d: -f1)
-    [ -n "$account" ]
+    account=$(grep -n "^mysql --batch$" "$CALLS" | head -1 | cut -d: -f1)
+    reach=$(grep -n "information_schema.schemata" "$CALLS" | head -1 | cut -d: -f1)
     [ "$create" -lt "$account" ]
-    [ "$account" -lt "$grant" ]
+    [ "$account" -lt "$reach" ]
+    # as the web user, over the socket
+    grep -q "^runuser -u www-data -- mysql --protocol=socket" "$CALLS"
 }
 
-@test "the keel-init path: an empty conf, the values asked, the account set with the asked password" {
+@test "the keel-init path: an empty conf, the administrator password asked, the account made" {
     : > "$CONF"
     export INITHOOKS_UNATTENDED=no
     run bash "$HOOK" < /dev/null
     [ "$status" -eq 0 ]
-    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'asked-DB_PASS';" "$STDIN_SQL"
-    grep -q "define('DB_PASSWORD', 'asked-DB_PASS');" "$WPROOT/wp-config.php"
+    grep -qxF "CREATE USER IF NOT EXISTS 'www-data'@'localhost' IDENTIFIED VIA unix_socket;" "$STDIN_SQL"
     [ -f "$WORDPRESS_READY" ]
 }
 
-@test "a password with a quote and a backslash is escaped for SQL and kept as it is for PHP" {
-    _conf "DB_PASS='it'\\''s\\x'"
+@test "another schema name is granted to the web user" {
+    _conf "APP_DB_NAME='blog'"
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    grep -qxF "ALTER USER 'wordpress'@'localhost' IDENTIFIED BY 'it\\'s\\\\x';" "$STDIN_SQL"
-    grep -qF "define('DB_PASSWORD', 'it\\'s\\\\x');" "$WPROOT/wp-config.php"
+    grep -qxF "GRANT ALL PRIVILEGES ON \`blog\`.* TO 'www-data'@'localhost';" "$STDIN_SQL"
 }
 
-@test "another account name is created and granted the schema" {
-    _conf "APP_DB_USER='blog'"
-    run bash "$HOOK"
-    [ "$status" -eq 0 ]
-    grep -qxF "CREATE USER IF NOT EXISTS 'blog'@'localhost' IDENTIFIED BY 'declared-db-password';" "$STDIN_SQL"
-    grep -q "TO 'blog'@'localhost'" "$CALLS"
-}
-
-@test "an account the server will not change is fatal, before wp-config.php" {
+@test "an account the server will not make is fatal, before wp-config.php" {
     export WP_TEST_ACCOUNT_FAILS=1
     run bash "$HOOK"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"cannot give 'wordpress' its password"* ]]
+    [[ "$output" == *"cannot give www-data its socket account"* ]]
     [ ! -e "$WPROOT/wp-config.php" ]
     [ ! -e "$WORDPRESS_READY" ]
 }
@@ -510,12 +522,11 @@ EOF
 
 # --- the database refusing ---------------------------------------------------
 
-@test "a database that refuses the declared password is fatal" {
+@test "a database that refuses the socket login of the web user is fatal" {
     export WP_TEST_DB_REFUSES=1
     run bash "$HOOK"
     [ "$status" -ne 0 ]
     [[ "$output" == *"cannot reach the database"* ]]
-    [[ "$output" != *"35mysqlpass"* ]]
     [ ! -e "$WPROOT/wp-config.php" ]
 }
 
@@ -615,9 +626,8 @@ EOF
 @test "the log says how long each password was and never what it was" {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"(20 characters)"* ]]
+    [[ "$output" == *"(21 characters)"* ]]
     [[ "$output" != *"declared-app-password"* ]]
-    [[ "$output" != *"declared-db-password"* ]]
 }
 
 # --- a replica ---------------------------------------------------------------
@@ -636,7 +646,7 @@ _replica_spec() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"wp-config.php written"* ]]
     [[ "$output" == *"replica"* ]]
-    grep -q "define('DB_PASSWORD', 'declared-db-password');" "$WPROOT/wp-config.php"
+    grep -q "define('DB_PASSWORD', '');" "$WPROOT/wp-config.php"
     run grep -cE "CREATE DATABASE|core install|rewrite structure|eval-file|option update|information_schema" "$CALLS"
     [ "$output" = "0" ]
 }
@@ -663,17 +673,6 @@ _replica_spec() {
     run bash "$HOOK"
     [ "$status" -eq 0 ]
     [ -e "$WPROOT/wp-config.php" ]
-}
-
-@test "a replica still needs the database password, the same as the pair's primary" {
-    _replica_spec
-    _conf "DB_PASS=''"
-    export INITHOOKS_UNATTENDED="there is no terminal"
-    run bash "$HOOK"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"no DB_PASS in"* ]]
-    [ ! -e "$WPROOT/wp-config.php" ]
-    [ ! -e "$WORDPRESS_READY" ]
 }
 
 @test "a replica that has a wp-config.php keeps it" {
@@ -785,15 +784,6 @@ _replica_spec() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"authenticated against the site itself"* ]]
     [ -f "$WORDPRESS_READY" ]
-}
-
-@test "the account is granted the schema on every host before it is asked to reach it" {
-    run bash "$HOOK"
-    [ "$status" -eq 0 ]
-    grant=$(grep -n "GRANT ALL PRIVILEGES ON \`wordpress\`" "$CALLS" | head -1 | cut -d: -f1)
-    reach=$(grep -n "information_schema.schemata" "$CALLS" | head -1 | cut -d: -f1)
-    [ -n "$grant" ]
-    [ "$grant" -lt "$reach" ]
 }
 
 @test "a spec that cannot be read stops the hook before it writes anything" {
