@@ -12,17 +12,16 @@
 WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/wordpress}"
 WORDPRESS_CONFIG="${WORDPRESS_CONFIG:-$WORDPRESS_ROOT/wp-config.php}"
 WORDPRESS_WEB_USER="${WORDPRESS_WEB_USER:-www-data}"
-# The database this appliance owns, and the account that reaches it. The
-# account is the one conf.d/main creates unusable. firstboot.d/40wordpress
-# gives it the declared password (wordpress_account_sql). The parent
-# layer's 35mysqlpass reads app.options.db_user too, so a description that
-# names wordpress there gives the same password to the same account twice.
+# The database this appliance owns. app.options.db_user names the account
+# that lnmp's 35mysqlpass gives the MariaDB password; the site itself logs in
+# as the web user over the socket (wordpress_socket_account_sql).
 WORDPRESS_DB_NAME="${WORDPRESS_DB_NAME:-wordpress}"
 WORDPRESS_DB_USER="${WORDPRESS_DB_USER:-wordpress}"
 WORDPRESS_DB_PREFIX="${WORDPRESS_DB_PREFIX:-wp_}"
-# IPv6 first, and a literal: on Debian "localhost" resolves to 127.0.0.1
-# only (docs/traps.md), and WordPress takes an IPv6 literal in brackets.
-WORDPRESS_DB_HOST="${WORDPRESS_DB_HOST:-[::1]}"
+# The site logs in over the socket (localhost): the web user with no password
+# (unix_socket), and wp-cli as root as the root account of the same socket.
+WORDPRESS_DB_HOST="${WORDPRESS_DB_HOST:-localhost}"
+WORDPRESS_DB_LOGIN="${WORDPRESS_DB_LOGIN:-www-data}"
 WORDPRESS_ADMIN_USER="${WORDPRESS_ADMIN_USER:-admin}"
 WORDPRESS_SITE_TITLE="${WORDPRESS_SITE_TITLE:-WordPress}"
 WORDPRESS_ADMIN_EMAIL="${WORDPRESS_ADMIN_EMAIL:-admin@example.com}"
@@ -45,7 +44,6 @@ WORDPRESS_READY="${WORDPRESS_READY:-/var/www/.keel-wordpress-ready}"
 WORDPRESS_WAIT_TRIES="${WORDPRESS_WAIT_TRIES:-30}"
 # The eight keys wp-config.php carries. WordPress asks its own API for them;
 # a first boot must not need the internet, so they are generated here.
-WORDPRESS_SALT_KEYS="AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT"
 WORDPRESS_SALT_BYTES=48
 # What a WordPress login may be here, and what a database identifier may be.
 # Both are narrower than what the software accepts: a name that would need
@@ -151,14 +149,14 @@ wordpress_site_url() {
     printf '%s\n' "$value"
 }
 
-# wordpress_missing_values APP_PASS DB_PASS [ROLE]: the names of the values
-# that need a prompt, one per line. Empty output means the instance
-# description carried everything, which is the headless case the boot test
-# proves. A replica installs nothing, so it needs no administrator password:
-# the administrator is a row that comes with the copy of the primary.
+# wordpress_missing_values APP_PASS [ROLE]: the names of the values that need
+# a prompt, one per line. Empty output means the instance description carried
+# everything, which is the headless case the boot test proves. A replica
+# installs nothing, so it needs no administrator password: the administrator
+# is a row that comes with the copy of the primary. The site logs in over the
+# socket, so no database password is asked.
 wordpress_missing_values() {
-    [[ -n "${1-}" || "${3-}" == replica ]] || echo APP_PASS
-    [[ -n "${2-}" ]] || echo DB_PASS
+    [[ -n "${1-}" || "${2-}" == replica ]] || echo APP_PASS
     return 0
 }
 
@@ -199,48 +197,15 @@ wordpress_is_replica() {
     return 1
 }
 
-# wordpress_grant_sql NAME USER: the statements that give the account its
-# schema, one for each host the image created it for. The image grants the
-# default schema only; a schema with another name (app.options.db_name)
-# needs these. GRANT adds and does nothing the second time.
-wordpress_grant_sql() {
-    local host
+# wordpress_socket_account_sql NAME: the statements that give the web user
+# its socket account (unix_socket, no password) and the schema. The two
+# nodes of a cloud pair then need no password that each must know: the seed
+# of a replica copies the account with the rest of the primary (decision of
+# 2026-11-06). CREATE IF NOT EXISTS and GRANT do nothing the second time.
+wordpress_socket_account_sql() {
     wordpress_is_ident "${1-}" || return 1
-    wordpress_is_ident "${2-}" || return 1
-    for host in localhost ::1 127.0.0.1; do
-        printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%s';\n" "$1" "$2" "$host"
-    done
-}
-
-# wordpress_sql_string VALUE: VALUE as a single quoted SQL string literal.
-# With backslash escapes on (wordpress_account_sql sets them for its
-# session), only a backslash and a single quote mean anything inside one.
-wordpress_sql_string() {
-    local value=${1-}
-    value=${value//\\/\\\\}
-    value=${value//\'/\\\'}
-    printf "'%s'" "$value"
-}
-
-# wordpress_account_sql USER PASS: the statements that give the database
-# account its password on each host the image created it for, and create
-# the account when the image did not (an app.options.db_user of another
-# name). The first boot hook owns this account: under keel-init the
-# inithooks conf is empty, so the parent layer's 35mysqlpass gives its
-# password to its own account 'admin' and not to this one. The hook sends
-# these statements to mysql on standard input, never as an argument, as
-# PASS is in them. The session mode comes first, so that the server reads
-# the escapes of wordpress_sql_string as escapes.
-wordpress_account_sql() {
-    local user=${1-} pass=${2-} host quoted
-    wordpress_is_ident "$user" || return 1
-    [[ -n "$pass" ]] || return 1
-    quoted=$(wordpress_sql_string "$pass")
-    echo "SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '');"
-    for host in localhost ::1 127.0.0.1; do
-        printf "CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY %s;\n" "$user" "$host" "$quoted"
-        printf "ALTER USER '%s'@'%s' IDENTIFIED BY %s;\n" "$user" "$host" "$quoted"
-    done
+    printf "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED VIA unix_socket;\n" "$WORDPRESS_DB_LOGIN"
+    printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'localhost';\n" "$1" "$WORDPRESS_DB_LOGIN"
 }
 
 # wordpress_create_database_sql NAME: the statement that makes the schema.
@@ -261,17 +226,6 @@ wordpress_masked() {
     fi
 }
 
-# wordpress_salt: one value for a wp-config.php key. Base64 of random bytes,
-# with the two characters that mean something inside a single quoted PHP
-# string taken out, so no escaping is needed and none can be got wrong.
-wordpress_salt() {
-    local raw
-    raw=$(${WORDPRESS_RANDOM:-openssl rand -base64 $WORDPRESS_SALT_BYTES}) || return 1
-    raw=$(printf '%s' "$raw" | LC_ALL=C tr -d "\\\\'\n\r")
-    [[ ${#raw} -ge 32 ]] || return 1
-    printf '%s\n' "$raw"
-}
-
 # wordpress_php_string VALUE: VALUE as a single quoted PHP string literal.
 # Only a backslash and a single quote mean anything inside one.
 wordpress_php_string() {
@@ -281,7 +235,7 @@ wordpress_php_string() {
     printf "'%s'" "$value"
 }
 
-# wordpress_config_php DB_NAME DB_USER DB_PASS DB_HOST DB_PREFIX SITE_URL:
+# wordpress_config_php DB_NAME DB_HOST DB_PREFIX SITE_URL:
 # the whole of wp-config.php on stdout.
 #
 # Two things in it are the appliance's own and not WordPress's defaults.
@@ -304,12 +258,9 @@ wordpress_php_string() {
 # depend on somebody visiting the site; and automatic core updates off,
 # because core here is root owned and updated by a person (README.rst).
 wordpress_config_php() {
-    local db_name=${1-} db_user=${2-} db_pass=${3-} db_host=${4-}
-    local db_prefix=${5-} site_url=${6-} key salt
+    local db_name=${1-} db_host=${2-} db_prefix=${3-} site_url=${4-}
     wordpress_is_ident "$db_name" || return 1
-    wordpress_is_ident "$db_user" || return 1
     wordpress_is_ident "$db_prefix" || return 1
-    [[ -n "$db_pass" ]] || return 1
     [[ -n "$db_host" ]] || return 1
     [[ -n "$site_url" ]] || return 1
     cat <<HEADER
@@ -318,26 +269,24 @@ wordpress_config_php() {
  * WordPress configuration of a Keel Linux appliance.
  *
  * Written by /usr/lib/inithooks/firstboot.d/40wordpress on the first boot
- * from the instance description in /etc/keel/instance.yaml. Nothing in it
- * was chosen when the layer was built: the database password is
- * secrets.db_password of that description and the salts below were
- * generated on this machine.
+ * from the instance description in /etc/keel/instance.yaml. It holds no
+ * secret: the site logs in over the socket of MariaDB with no password, as
+ * the web user (wp-cli as root logs in as root), and the salts are options of
+ * the database. On a cloud pair keel seeds that database to the replica and
+ * replicates it, so both nodes have the same salts and a login cookie of one
+ * opens on the other (decision of 2026-11-06).
  *
  * To write it again: remove this file and run the hook.
  */
 
 define('DB_NAME', $(wordpress_php_string "$db_name"));
-define('DB_USER', $(wordpress_php_string "$db_user"));
-define('DB_PASSWORD', $(wordpress_php_string "$db_pass"));
+define('DB_USER', (function_exists('posix_geteuid') && posix_geteuid() === 0) ? 'root' : $(wordpress_php_string "$WORDPRESS_DB_LOGIN"));
+define('DB_PASSWORD', '');
 define('DB_HOST', $(wordpress_php_string "$db_host"));
 define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 
 HEADER
-    for key in $WORDPRESS_SALT_KEYS; do
-        salt=$(wordpress_salt) || return 1
-        printf "define('%s', %s);\n" "$key" "$(wordpress_php_string "$salt")"
-    done
     cat <<FOOTER
 
 \$table_prefix = $(wordpress_php_string "$db_prefix");

@@ -156,20 +156,18 @@ setup() {
 
 # --- the values a headless boot needs ----------------------------------------
 
-@test "missing_values is empty when the description carried both" {
-    run wordpress_missing_values "app" "db"
+# The site logs in over the socket with no password (decision of
+# 2026-11-06), so the only value a headless boot needs is the administrator's.
+@test "missing_values is empty when the description carried the administrator password" {
+    run wordpress_missing_values "app"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "missing_values names each absent value" {
-    run wordpress_missing_values "" "db"
+@test "missing_values names the administrator password, and never a database password" {
+    run wordpress_missing_values ""
     [ "$output" = "APP_PASS" ]
-    run wordpress_missing_values "app" ""
-    [ "$output" = "DB_PASS" ]
-    run wordpress_missing_values "" ""
-    [ "${lines[0]}" = "APP_PASS" ]
-    [ "${lines[1]}" = "DB_PASS" ]
+    [[ "$output" != *DB_PASS* ]]
 }
 
 @test "masked says how long a password is and never what it is" {
@@ -194,42 +192,33 @@ setup() {
     [ "$output" = "'a\\\\b'" ]
 }
 
-@test "salt strips the characters that would end a PHP string" {
-    WORDPRESS_RANDOM="printf %s \\\\'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop"
-    run wordpress_salt
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"'"* ]]
-    [[ "$output" != *"\\"* ]]
-}
-
-@test "salt fails when the source gives too little" {
-    WORDPRESS_RANDOM="echo short"
-    run wordpress_salt
-    [ "$status" -ne 0 ]
-}
-
 # --- wp-config.php -----------------------------------------------------------
 
-@test "config_php names the database, the account, the password and the host" {
-    run wordpress_config_php wordpress wpuser "s3cr3t" "[::1]" wp_ "https://blog.example.org"
+# The two nodes of a cloud pair share what wp-config.php used to make on each
+# machine (decision of 2026-11-06). The site logs in over the socket as the
+# web user with no password; wp-cli as root logs in as root over the same
+# socket. The salts are options of the database, which keel seeds to the
+# replica and replicates, so a login cookie of one node opens on the other.
+@test "config_php logs in over the socket, as root for root and as the web user otherwise, with no password" {
+    run wordpress_config_php wordpress localhost wp_ "https://blog.example.org"
     [ "$status" -eq 0 ]
     [[ "$output" == *"define('DB_NAME', 'wordpress');"* ]]
-    [[ "$output" == *"define('DB_USER', 'wpuser');"* ]]
-    [[ "$output" == *"define('DB_PASSWORD', 's3cr3t');"* ]]
-    [[ "$output" == *"define('DB_HOST', '[::1]');"* ]]
+    [[ "$output" == *"define('DB_USER', (function_exists('posix_geteuid') && posix_geteuid() === 0) ? 'root' : 'www-data');"* ]]
+    [[ "$output" == *"define('DB_PASSWORD', '');"* ]]
+    [[ "$output" == *"define('DB_HOST', 'localhost');"* ]]
     [[ "$output" == *"\$table_prefix = 'wp_';"* ]]
 }
 
-@test "config_php carries all eight salt keys" {
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+@test "config_php defines no salt: WordPress keeps them in its database" {
+    run wordpress_config_php wordpress localhost wp_ "https://x.example.org"
     for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY \
         AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-        [[ "$output" == *"define('$key',"* ]]
+        [[ "$output" != *"'$key'"* ]]
     done
 }
 
 @test "config_php derives the served address from the Host header" {
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+    run wordpress_config_php wordpress localhost wp_ "https://x.example.org"
     [[ "$output" == *"HTTP_HOST"* ]]
     [[ "$output" == *"define('WP_SITEURL', WP_HOME);"* ]]
     [[ "$output" == *"define('KEEL_WP_FALLBACK_URL', 'https://x.example.org');"* ]]
@@ -240,7 +229,7 @@ setup() {
     # X-Forwarded-Proto and no HTTPS variable. WordPress sets FORCE_SSL_ADMIN
     # from an https site URL and then redirects wp-login.php to itself for
     # ever, because is_ssl() reads $_SERVER['HTTPS'] only.
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+    run wordpress_config_php wordpress localhost wp_ "https://x.example.org"
     [[ "$output" == *"if (\$keel_wp_scheme === 'https') {"* ]]
     [[ "$output" == *"\$_SERVER['HTTPS'] = 'on';"* ]]
     # and it is set before the address that WordPress reads is defined
@@ -251,39 +240,23 @@ setup() {
 }
 
 @test "config_php turns off the visitor driven cron and automatic core updates" {
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x.example.org"
+    run wordpress_config_php wordpress localhost wp_ "https://x.example.org"
     [[ "$output" == *"define('DISABLE_WP_CRON', true);"* ]]
     [[ "$output" == *"define('AUTOMATIC_UPDATER_DISABLED', true);"* ]]
     [[ "$output" == *"define('WP_AUTO_UPDATE_CORE', false);"* ]]
 }
 
-@test "config_php escapes a password that carries a quote" {
-    run wordpress_config_php wordpress wpuser "pa'ss" "[::1]" wp_ "https://x.example.org"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"define('DB_PASSWORD', 'pa\\'ss');"* ]]
-}
-
-@test "config_php refuses an empty password, host, prefix or url" {
-    run wordpress_config_php wordpress wpuser "" "[::1]" wp_ "https://x"
+@test "config_php refuses an empty host, prefix or url" {
+    run wordpress_config_php wordpress "" wp_ "https://x"
     [ "$status" -ne 0 ]
-    run wordpress_config_php wordpress wpuser pass "" wp_ "https://x"
+    run wordpress_config_php wordpress localhost "" "https://x"
     [ "$status" -ne 0 ]
-    run wordpress_config_php wordpress wpuser pass "[::1]" "" "https://x"
-    [ "$status" -ne 0 ]
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ ""
+    run wordpress_config_php wordpress localhost wp_ ""
     [ "$status" -ne 0 ]
 }
 
-@test "config_php refuses a database name or account that needs quoting" {
-    run wordpress_config_php "word press" wpuser pass "[::1]" wp_ "https://x"
-    [ "$status" -ne 0 ]
-    run wordpress_config_php wordpress "wp-user" pass "[::1]" wp_ "https://x"
-    [ "$status" -ne 0 ]
-}
-
-@test "config_php fails when the salt source fails" {
-    WORDPRESS_RANDOM="false"
-    run wordpress_config_php wordpress wpuser pass "[::1]" wp_ "https://x"
+@test "config_php refuses a database name that needs quoting" {
+    run wordpress_config_php "word press" localhost wp_ "https://x"
     [ "$status" -ne 0 ]
 }
 
@@ -401,82 +374,30 @@ setup() {
 }
 
 @test "missing_values does not ask a replica for the administrator password" {
-    run wordpress_missing_values "" "db" replica
+    run wordpress_missing_values "" replica
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
-    run wordpress_missing_values "" "" replica
-    [ "$output" = "DB_PASS" ]
 }
 
 @test "the permalink structure is the post name" {
     [ "$WORDPRESS_PERMALINKS" = "/%postname%/" ]
 }
 
-@test "grant_sql grants the account its schema on the three hosts" {
-    run wordpress_grant_sql site wp_user
+@test "socket_account_sql: the web user over the socket, with no password, and its grant" {
+    run wordpress_socket_account_sql site
     [ "$status" -eq 0 ]
-    [ "${#lines[@]}" -eq 3 ]
-    [ "${lines[0]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'localhost';" ]
-    [ "${lines[1]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'::1';" ]
-    [ "${lines[2]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'wp_user'@'127.0.0.1';" ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = "CREATE USER IF NOT EXISTS 'www-data'@'localhost' IDENTIFIED VIA unix_socket;" ]
+    [ "${lines[1]}" = "GRANT ALL PRIVILEGES ON \`site\`.* TO 'www-data'@'localhost';" ]
 }
 
-@test "grant_sql refuses a name or an account that would need quoting" {
-    run wordpress_grant_sql 'a b' wp_user
+@test "socket_account_sql refuses a name that would need quoting" {
+    run wordpress_socket_account_sql 'a b'
     [ "$status" -ne 0 ]
-    run wordpress_grant_sql site "x'; DROP USER y; --"
-    [ "$status" -ne 0 ]
-    run wordpress_grant_sql "" wp_user
+    run wordpress_socket_account_sql ""
     [ "$status" -ne 0 ]
 }
 
 @test "the ready marker is a file beside the WordPress tree, not in it" {
     [[ "$WORDPRESS_READY" == /var/www/.keel-wordpress-ready ]]
-}
-
-# --- the database account (40wordpress gives it its password) ----------------
-# The hook gives the account its password through the root socket, on a
-# primary or a standalone node. Under keel-init the inithooks conf is empty,
-# so lnmp's 35mysqlpass sets its own account 'admin' and not this one.
-
-@test "sql_string quotes a value as a SQL string literal" {
-    run wordpress_sql_string 'plain'
-    [ "$status" -eq 0 ]
-    [ "$output" = "'plain'" ]
-}
-
-@test "sql_string escapes a backslash and a single quote, and nothing else" {
-    run wordpress_sql_string "a'b\\c\"d%e_f"
-    [ "$status" -eq 0 ]
-    [ "$output" = "'a\\'b\\\\c\"d%e_f'" ]
-}
-
-@test "account_sql creates the account on the three hosts and sets its password" {
-    run wordpress_account_sql wp_user 's3cret'
-    [ "$status" -eq 0 ]
-    [ "${#lines[@]}" -eq 7 ]
-    [ "${lines[0]}" = "SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '');" ]
-    [ "${lines[1]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'localhost' IDENTIFIED BY 's3cret';" ]
-    [ "${lines[2]}" = "ALTER USER 'wp_user'@'localhost' IDENTIFIED BY 's3cret';" ]
-    [ "${lines[3]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'::1' IDENTIFIED BY 's3cret';" ]
-    [ "${lines[4]}" = "ALTER USER 'wp_user'@'::1' IDENTIFIED BY 's3cret';" ]
-    [ "${lines[5]}" = "CREATE USER IF NOT EXISTS 'wp_user'@'127.0.0.1' IDENTIFIED BY 's3cret';" ]
-    [ "${lines[6]}" = "ALTER USER 'wp_user'@'127.0.0.1' IDENTIFIED BY 's3cret';" ]
-}
-
-@test "account_sql escapes a password with a quote and a backslash in it" {
-    run wordpress_account_sql wp_user "it's\\x"
-    [ "$status" -eq 0 ]
-    [ "${lines[2]}" = "ALTER USER 'wp_user'@'localhost' IDENTIFIED BY 'it\\'s\\\\x';" ]
-}
-
-@test "account_sql refuses an account that would need quoting, and an empty password" {
-    run wordpress_account_sql "x'; DROP USER y; --" pass
-    [ "$status" -ne 0 ]
-    [ -z "$output" ]
-    run wordpress_account_sql "" pass
-    [ "$status" -ne 0 ]
-    run wordpress_account_sql wp_user ""
-    [ "$status" -ne 0 ]
-    [ -z "$output" ]
 }

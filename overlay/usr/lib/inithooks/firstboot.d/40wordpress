@@ -6,29 +6,25 @@
 # What it needs and where each value comes from (keel/spec/constants.py of the
 # keel repository is the table that maps a spec field to a variable):
 #
-#   secrets.db_password    -> DB_PASS         the database account's password,
-#                                             which this hook gives to the
-#                                             account (see below)
 #   secrets.app_password   -> APP_PASS        the WordPress administrator
 #   app.options.admin_user -> APP_ADMIN_USER  that administrator's login
 #   app.options.site_title -> APP_SITE_TITLE  the site title
 #   app.email              -> APP_EMAIL       the administrator's address
 #   app.domain             -> APP_DOMAIN      the recorded site URL
-#   app.options.db_user    -> APP_DB_USER     the database account, the same
-#                                             field the parent layer reads
 #   app.options.db_name    -> APP_DB_NAME     the database
 #
 # Runs at 40, after 35mysqlpass of the parent layer and after 15regen-sslcert,
 # which replaces the certificate nginx serves on 443.
 #
-# This hook owns its database account. On a primary or a standalone node it
-# gives the account DB_PASS through the root socket, and creates the account
-# when the image does not have it. 35mysqlpass sets the password of the
-# account that APP_DB_USER names, and under keel-init the inithooks conf is
-# empty (98finalize blanked it): 35mysqlpass then sets its own account
-# 'admin', and this account kept the password of no input (BR2, 2026-11-05).
-# A description that names wordpress in app.options.db_user gives the same
-# password to the same account twice, which changes nothing.
+# The site logs in to MariaDB over the socket as the web user, with no
+# password (unix_socket), and wp-cli as root logs in as root over the same
+# socket; wp-config.php holds no secret and no salt. WordPress keeps its
+# salts as options of its database when wp-config.php defines none, and this
+# hook stores them there. On a cloud pair keel seeds that database to the
+# replica and replicates it, so both nodes have one account and one set of
+# salts, and a login of one node is a login of the other after a failover
+# (decision of 2026-11-06). app.options.db_user is the account of lnmp's
+# 35mysqlpass, not the site's.
 #
 # Whether anybody can answer the dialog is inithooks' rule, lib/console.sh,
 # as for 35mysqlpass. A test of standard input for a terminal is not
@@ -77,7 +73,9 @@ site_title=$(wordpress_site_title "${APP_SITE_TITLE-}") \
     || fatal "no site title: declare app.options.site_title"
 site_url=$(wordpress_site_url "${APP_DOMAIN-}") \
     || fatal "'${APP_DOMAIN-}' is not a domain or a URL: declare app.domain"
-db_user=$(wordpress_db_user "${APP_DB_USER-}") \
+# app.options.db_user is lnmp's (35mysqlpass); a value it would refuse is
+# refused here too, before anything is written
+wordpress_db_user "${APP_DB_USER-}" > /dev/null \
     || fatal "'${APP_DB_USER-}' is not a database account name this appliance will use"
 db_name=$(wordpress_db_name "${APP_DB_NAME-}") \
     || fatal "'${APP_DB_NAME-}' is not a database name this appliance will use"
@@ -99,19 +97,18 @@ deferred() {
     fi
 }
 
-mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "${DB_PASS-}" "$role")
+mapfile -t missing < <(wordpress_missing_values "${APP_PASS-}" "$role")
 if [[ ${#missing[@]} -gt 0 ]]; then
     if console_unattended; then
         why="no ${missing[*]} in $INITHOOKS_CONF: WordPress stays not installed"
-        why+=" and the site answers 503; declare secrets.app_password and"
-        why+=" secrets.db_password in the instance description, or keel-init asks them"
+        why+=" and the site answers 503; declare secrets.app_password"
+        why+=" in the instance description, or keel-init asks it"
         deferred "$why"
         exit 0
     fi
     while IFS='=' read -r key value; do
         [[ -n "$key" ]] && declare "$key=$value"
     done < <("$INITHOOKS_PATH/bin/wordpress.py" "${missing[@]}")
-    [[ -n "${DB_PASS-}" ]] || fatal "no password given"
     [[ -n "${APP_PASS-}" || "$role" == replica ]] || fatal "no password given"
 fi
 
@@ -128,25 +125,23 @@ if wordpress_is_replica "$role" "$read_only"; then
 fi
 
 write_config() {
-    # wp-config.php, written once. The password reaches the file as a shell
-    # function argument and appears nowhere else; the file is readable by the
-    # web server and by nobody else, because PHP has to read it.
+    # wp-config.php, written once. It holds no secret; it is readable by the
+    # web server and by nobody else, as it was when it held a password.
     [[ ! -e "$WORDPRESS_CONFIG" ]] || return 0
     local tmp
     tmp=$(mktemp "$WORDPRESS_ROOT/.wp-config.php.XXXXXX") \
         || fatal "cannot write beside $WORDPRESS_CONFIG"
     trap 'rm -f "$tmp"' EXIT
     chmod 0600 "$tmp"
-    wordpress_config_php "$db_name" "$db_user" "$DB_PASS" \
-        "$WORDPRESS_DB_HOST" "$db_prefix" "$site_url" > "$tmp" \
+    wordpress_config_php "$db_name" "$WORDPRESS_DB_HOST" "$db_prefix" "$site_url" > "$tmp" \
         || fatal "cannot render wp-config.php"
     php -l "$tmp" > /dev/null || fatal "the wp-config.php just written is not valid PHP"
     chown root:"$WORDPRESS_WEB_USER" "$tmp"
     chmod 0640 "$tmp"
     mv "$tmp" "$WORDPRESS_CONFIG"
     trap - EXIT
-    echo "wp-config.php written: database '$db_name' as '$db_user' on" \
-        "$WORDPRESS_DB_HOST, password from DB_PASS $(wordpress_masked "$DB_PASS")"
+    echo "wp-config.php written: database '$db_name' as '$WORDPRESS_DB_LOGIN' over" \
+        "the socket of $WORDPRESS_DB_HOST, with no password and no salt"
 }
 
 # The site is open from here on. Until this file exists the route of the site
@@ -190,26 +185,18 @@ if [[ "$replica" == true ]]; then
 fi
 
 # The schema, made here and not in the image (see the top of this file); then
-# the account gets its password and the schema, and is asked whether it
-# reaches it. The statements of the account hold DB_PASS, so they go to the
-# client on standard input (printf is a builtin: no argument of a process),
-# and they are made first, so that a statement that cannot be made stops
-# the hook instead of an empty input that mysql would accept.
+# the web user gets its socket account and the schema, and is asked, over
+# the socket as itself, whether it reaches it.
 mysql --batch --execute="$(wordpress_create_database_sql "$db_name")" \
     || fatal "cannot create the database '$db_name' on $WORDPRESS_DB_SERVICE"
-account_sql=$(wordpress_account_sql "$db_user" "$DB_PASS") \
-    || fatal "cannot build the statements of the account '$db_user'"
+account_sql=$(wordpress_socket_account_sql "$db_name") \
+    || fatal "cannot build the statements of the socket account of $WORDPRESS_DB_LOGIN"
 printf '%s\n' "$account_sql" | mysql --batch \
-    || fatal "cannot give '$db_user' its password on $WORDPRESS_DB_SERVICE"
-unset account_sql
-mysql --batch --execute="$(wordpress_grant_sql "$db_name" "$db_user")" \
-    || fatal "cannot grant '$db_user' the database '$db_name' on $WORDPRESS_DB_SERVICE"
-MYSQL_PWD="$DB_PASS" mysql --user="$db_user" --host=::1 --port=3306 \
-    --protocol=TCP --batch --skip-column-names \
+    || fatal "cannot give $WORDPRESS_DB_LOGIN its socket account on $WORDPRESS_DB_SERVICE"
+runuser -u "$WORDPRESS_DB_LOGIN" -- mysql --protocol=socket --batch --skip-column-names \
     --execute="SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db_name'" \
     | grep -qx 1 \
-    || fatal "'$db_user' cannot reach the database '$db_name' on [::1]:3306 with" \
-        "the declared secrets.db_password"
+    || fatal "$WORDPRESS_DB_LOGIN cannot reach the database '$db_name' over the socket"
 
 write_config
 ensure_replicated_dirs
@@ -237,6 +224,12 @@ else
     wp rewrite structure "$WORDPRESS_PERMALINKS" > /dev/null \
         || fatal "cannot set the permalink structure"
 fi
+
+# The salts, as options of the database (wp-config.php defines none). They
+# are made here, on a server that takes writes, and not at the first request,
+# which may come to a read-only replica.
+wp eval-file "$INITHOOKS_PATH/lib/wordpress-set-salts.php" \
+    || fatal "cannot store the salts in the database '$db_name'"
 
 # The declared administrator password, and then the site's own answer to
 # whether that password works. Both are PHP beside this file rather than PHP

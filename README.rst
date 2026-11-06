@@ -134,8 +134,9 @@ visitor. ``firstboot.d/40wordpress`` reads:
 ``app.options.site_title``   the site title
 ``app.options.admin_user``   the WordPress administrator's login
 ``secrets.app_password``     that administrator's password
-``secrets.db_password``      the database password, which the hook gives to
-                             the database account through the root socket
+``secrets.db_password``      the MariaDB password of lnmp's account (35mysqlpass);
+                             the site itself logs in over the socket as
+                             www-data, with no password
 ``app.options.db_user``      the database account (the same field the parent
                              layer reads, so one declaration serves both);
                              ``wordpress``
@@ -170,8 +171,14 @@ recorded one, which for an appliance reached by its IPv6 literal means sending
 the visitor to a name that does not resolve. The recorded URL is the fallback
 for WP-CLI and ``wp-cron``, which carry no ``Host`` header.
 
-The salts in ``wp-config.php`` are generated on the machine rather than fetched
-from WordPress's API, because a first boot must not need the internet.
+``wp-config.php`` holds no password and no salt. The site logs in to MariaDB
+over the socket as www-data (``unix_socket``), and wp-cli as root logs in as
+root over the same socket. The salts are options of the database: the first
+boot stores them (``lib/wordpress-set-salts.php``), and ``wp_salt()`` reads them
+when ``wp-config.php`` defines none. On a cloud pair keel seeds the database to
+the replica and replicates it, so both nodes have one account and one set of
+salts, and a login stays a login after a failover. No salt is fetched from
+WordPress's API, because a first boot must not need the internet.
 
 What our archive updates, and what it does not
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -271,8 +278,9 @@ Every password comes from the instance description; none is set here and none
 is typed at a console on a headless first boot.
 
 -  Webmin and SSH: username **root**, from ``secrets.root_password``
--  the WordPress database account: username **wordpress**
-   (``app.options.db_user``), from ``secrets.db_password``
+-  the MariaDB account of lnmp (``app.options.db_user``), from
+   ``secrets.db_password``; the site logs in as **www-data** over the socket,
+   with no password
 -  WordPress: username **admin** (``app.options.admin_user``), from
    ``secrets.app_password``
 

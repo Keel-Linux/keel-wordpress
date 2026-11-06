@@ -8,9 +8,9 @@ base: lnmp
 # inherited with their states: nginx, PHP-FPM and MariaDB are already there,
 # and this layer adds none. The database account and its password are lnmp's
 # too (the option db_user and the secret db_password, whose names are unique
-# across the chain): an instance description of this appliance sets db_user
-# to wordpress, the account that the layer ships with no password and that
-# firstboot.d/40wordpress gives the declared one. The administrator's
+# across the chain). The site logs in over the socket as www-data, with no
+# password, and keeps its salts in its database: on a cloud pair both come
+# with the copy of the primary (decision of 2026-11-06). The administrator's
 # password is secrets.app_password, a name of the spec itself.
 # state: the directories WordPress writes at run time (0050's amendment of
 # 2026-10-20, item 2, and its note of 2026-10-24: uploads, themes, plugins
