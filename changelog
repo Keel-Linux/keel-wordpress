@@ -1,3 +1,15 @@
+keel-wordpress-19.0 (15) keel; urgency=medium
+
+  * The login by IP passes Coraza. Opened by IP, as an operator does before
+    the name points to the machine (decision 0079), the login form's
+    redirect_to names an IP, and the Core Rule Set refused the login with
+    403: rule 931100 by IPv4, and 931100 and 932130 by IPv6 (commissioning
+    run of the cloud simple mode, BR1 and BR2, 2026-11-06). Rules 10103
+    and 10104 lift those two rules from redirect_to on /wp-login.php only,
+    when it is the only redirect_to and its host is the request's own Host.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 14:00:00 +0000
+
 keel-wordpress-19.0 (14) keel; urgency=medium
 
   * WordPress 7.1.4, the current release. The image carried 7.1, and the
