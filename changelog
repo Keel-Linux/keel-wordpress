@@ -1,3 +1,12 @@
+keel-wordpress-19.0 (17) keel; urgency=medium
+
+  * The cron job asks the server whether it is read-only through wp-cli,
+    with the account of wp-config.php. www-data has no MariaDB account, the
+    mysql client was refused, the guard never held, and the replica of a
+    cloud pair mailed root the errors of every run (BR2, 2026-11-06).
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 16:30:00 +0000
+
 keel-wordpress-19.0 (16) keel; urgency=medium
 
   * The build checks the routes through the snippets of keel-web 0.4.0

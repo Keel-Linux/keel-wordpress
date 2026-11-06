@@ -116,6 +116,9 @@ code() {
     job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
     [[ "$job" == *"SELECT @@global.read_only"* ]]
     [[ "$job" == *'!= 1 ] && /usr/local/bin/wp'* ]]
+    # asked with the account of wp-config.php: www-data has none of its own
+    [[ "$job" == *"/usr/local/bin/wp --path=/var/www/wordpress eval 'echo (int) \$GLOBALS[\"wpdb\"]->get_var(\"SELECT @@global.read_only\");'"* ]]
+    [[ "$job" != *"/usr/bin/mysql"* ]]
     # the schedule part of the line is run by sh: the test of the guard
     guard='[ "$(echo 1)" != 1 ]'
     run sh -c "$guard"
