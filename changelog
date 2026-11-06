@@ -8,6 +8,12 @@ keel-wordpress-19.0 (14) keel; urgency=medium
     of the archive agrees with the one wordpress.org publishes.
   * conf.d/main asks version.php for the whole release: before, a tree of
     7.1.4 passed the check for a pin of 7.1.
+  * tests/commission.yaml, the commissioning contract (decision 0075), as
+    Keel-Linux/.github holds it, with the checks of port 80 of keel-web
+    0.4.0 (handbook decision 0079): http://127.0.0.1/ 200 and
+    http://127.0.0.1/keel-health 204. The CI job "commission / contract"
+    checks it. The README says that port 80 of the loopback is the
+    site's.
 
  -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 12:00:00 +0000
 
