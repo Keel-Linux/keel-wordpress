@@ -6,6 +6,12 @@ keel-wordpress-19.0 (20) keel; urgency=medium
     ran in the seconds between read_only and the copy of the primary and
     mailed root the errors of the events (BR2, 2026-11-06, keel 0.23.89).
     A server that cannot be asked now gets no run.
+  * tests/commission.yaml, the commissioning contract (decision 0075), as
+    Keel-Linux/.github holds it, with the checks of port 80 of keel-web
+    0.4.0 (handbook decision 0079): http://127.0.0.1/ 200 and
+    http://127.0.0.1/keel-health 204. The CI job "commission / contract"
+    checks it. The README says that port 80 of the loopback is the
+    site's.
 
  -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 23:50:00 +0000
 
