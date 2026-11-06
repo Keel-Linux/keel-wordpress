@@ -239,3 +239,14 @@ PY
     grep -q 'bt_sources_verdict' "$REPO/tests/boot-test.sh"
     grep -q 'bt_build_leftovers_verdict' "$REPO/tests/boot-test.sh"
 }
+
+# keel-web 0.4.0 (decision 0079) moved the include of keel-default.d and
+# keel-front.d into snippets that the sites include; the build of the
+# wordpress layer on 0.4.0 failed on the old check (2026-11-06).
+@test "recipe: the routes are checked through the snippets of keel-web 0.4.0" {
+    code "$REPO/conf.d/main" | grep -qF "grep -qxF 'include /etc/nginx/keel-default.d/*.conf;' \"\$SNIPPETS/keel-web-site.conf\""
+    code "$REPO/conf.d/main" | grep -qF "grep -qxF 'include /etc/nginx/keel-front.d/*.conf;' \"\$SNIPPETS/keel-web-front.conf\""
+    code "$REPO/conf.d/main" | grep -qF 'include $SNIPPETS/keel-web-site.conf;" /etc/nginx/sites-available/keel-default'
+    code "$REPO/conf.d/main" | grep -qF 'include $SNIPPETS/keel-web-front.conf;" /etc/nginx/sites-available/default-anubis'
+    [ "$(code "$REPO/conf.d/main" | grep -c 'keel-web 0.4.0 is the least')" -eq 2 ]
+}

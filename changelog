@@ -1,3 +1,13 @@
+keel-wordpress-19.0 (16) keel; urgency=medium
+
+  * The build checks the routes through the snippets of keel-web 0.4.0
+    (decision 0079): each site includes /etc/nginx/snippets/keel-web-site.conf
+    or keel-web-front.conf, and the snippet includes keel-default.d or
+    keel-front.d. The build of the wordpress layer on keel-web 0.4.0 failed
+    on the old check (2026-11-06).
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 15:00:00 +0000
+
 keel-wordpress-19.0 (15) keel; urgency=medium
 
   * The login by IP passes Coraza. Opened by IP, as an operator does before
