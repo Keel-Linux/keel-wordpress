@@ -132,6 +132,46 @@ code() {
     [ ! -e "$REPO/overlay/etc/apache2" ]
 }
 
+# a NAME=VALUE line of conf.d/main, the value
+pin() {
+    sed -n "s|^$1=||p" "$REPO/conf.d/main"
+}
+
+@test "recipe: the WordPress pin is a release and a SHA-256" {
+    [[ "$(pin WP_VERSION)" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
+    [[ "$(pin WP_ARCHIVE_SHA256)" =~ ^[0-9a-f]{64}$ ]]
+}
+
+@test "recipe: the WordPress pin is not older than the release of 2026-11-06" {
+    # The dashboard of an image from 7.1 said "WordPress 7.1.4 is available!
+    # Please update now" (commissioning test of the ISO on BR1, 2026-11-06).
+    # A new image carries the release that was current when it was built.
+    floor=7.1.4
+    [ "$(printf '%s\n' "$floor" "$(pin WP_VERSION)" | sort -V | head -n 1)" = "$floor" ]
+}
+
+@test "recipe: the conf script checks the archive digest, then the per file checksums" {
+    grep -qF 'echo "$WP_ARCHIVE_SHA256  $WP_ARCHIVE" | sha256sum --check --strict' \
+        "$REPO/conf.d/main"
+    grep -qF 'keel-wp core verify-checksums --version="$WP_VERSION"' \
+        "$REPO/conf.d/main"
+}
+
+@test "recipe: the conf script asks for the whole release in version.php" {
+    # a prefix match lets the tree of 7.1.4 pass for a pin of 7.1
+    grep -qF "grep -q \"wp_version = '\${WP_VERSION}'\"" "$REPO/conf.d/main"
+}
+
+@test "recipe: the boot test and the notes name the pinned release and its digest" {
+    version=$(pin WP_VERSION)
+    digest=$(pin WP_ARCHIVE_SHA256)
+    grep -qxF "package_source=official WordPress $version archive pinned by SHA-256" \
+        "$REPO/tests/v19.sh"
+    grep -qF "integrity_evidence=WordPress $version archive SHA-256 $digest plus" \
+        "$REPO/tests/v19.sh"
+    grep -qF "exact WordPress $version archive SHA-256" "$REPO/docs/v19.0-testing.md"
+}
+
 @test "recipe: the changelog names the layer and the version is a number" {
     head -1 "$REPO/changelog" | grep -qE '^keel-wordpress-19\.0 \([0-9]+\) keel;'
 }

@@ -1,3 +1,16 @@
+keel-wordpress-19.0 (14) keel; urgency=medium
+
+  * WordPress 7.1.4, the current release. The image carried 7.1, and the
+    dashboard said "WordPress 7.1.4 is available! Please update now"
+    (commissioning test of the WordPress ISO on a Proxmox VM on BR1,
+    2026-11-06). The release stays pinned by the SHA-256 of its archive
+    and is verified against the per file checksums of WordPress. The SHA-1
+    of the archive agrees with the one wordpress.org publishes.
+  * conf.d/main asks version.php for the whole release: before, a tree of
+    7.1.4 passed the check for a pin of 7.1.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 12:00:00 +0000
+
 keel-wordpress-19.0 (13) keel; urgency=medium
 
   * The cron job of WordPress waits for the mark of a ready site. Before
