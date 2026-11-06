@@ -107,11 +107,11 @@ for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY \
 done
 
 cat >"$result" <<EOF
-package_source=official WordPress 7.1 archive pinned by SHA-256
+package_source=official WordPress 7.1.4 archive pinned by SHA-256
 installed_version=$before
 runtime_checks=firstboot, domain validation, administrator authentication, post persistence and authenticated session across restart, updater metadata, core checksums, the turnkey-* compatibility commands, ownership boundaries, and secret log hygiene
 updater_command=keel-wp core check-update --format=json; keel-wordpress-update as root (turnkey-wp and turnkey-wordpress-update are compatibility symlinks to those two)
 updater_result=valid update JSON, installed version unchanged, and non-root updater use fails closed
 updater_channel=official WordPress stable release channel
-integrity_evidence=WordPress 7.1 archive SHA-256 d1ae02b5ae18428031ffc3943659fa87ab361d827f4aa804adf9276e4dc75df6 plus official per-file core checksums
+integrity_evidence=WordPress 7.1.4 archive SHA-256 a147146c159362778ecbbbfb07bb20ddf4e85b130f971c824e656a8f938c5f87 plus official per-file core checksums
 EOF

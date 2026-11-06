@@ -30,9 +30,13 @@ WPROOT=/var/www/wordpress
 WEB_USER=www-data
 # WordPress is not a Debian package and is not in our archive, so the release
 # is pinned by digest and verified twice: against this digest, and against
-# WordPress's own per file checksums.
-WP_VERSION=7.1
-WP_ARCHIVE_SHA256=d1ae02b5ae18428031ffc3943659fa87ab361d827f4aa804adf9276e4dc75df6
+# WordPress's own per file checksums. To move the pin: take the release that
+# api.wordpress.org/core/version-check/1.7/ offers, compute the SHA-256 of
+# its archive, and compare the SHA-1 of the same archive with the
+# wordpress-VERSION.zip.sha1 that wordpress.org publishes (7.1.4: SHA-1
+# b552c39cd95d89895b4e7a55af53a03687aff4f6, 2026-11-06).
+WP_VERSION=7.1.4
+WP_ARCHIVE_SHA256=a147146c159362778ecbbbfb07bb20ddf4e85b130f971c824e656a8f938c5f87
 WP_CLI_VERSION=2.12.0
 WP_CLI_SHA256=ce34ddd838f7351d6759068d09793f26755463b4a4610a5a5c0a97b68220d85c
 WP_COMPLETION_SHA256=443ca0610ccae8d2d6aceba0ec4aa7929b87ed6cf54f666afed18d663a18a395
@@ -90,7 +94,7 @@ mkdir -p "$(dirname "$WPROOT")"
 unzip -q "$WP_ARCHIVE" -d "$(dirname "$WPROOT")"
 rm -rf "$tmp"
 [ -f "$WPROOT/wp-includes/version.php" ] || fatal "the archive did not unpack to $WPROOT"
-grep -q "wp_version = '${WP_VERSION}" "$WPROOT/wp-includes/version.php" \
+grep -q "wp_version = '${WP_VERSION}'" "$WPROOT/wp-includes/version.php" \
     || fatal "the unpacked tree is not WordPress $WP_VERSION"
 chown -R "$WEB_USER:$WEB_USER" "$WPROOT"
 

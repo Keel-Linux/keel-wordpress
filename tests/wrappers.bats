@@ -46,7 +46,7 @@ setup() {
     mkdir -p "$WPROOT/wp-content" "$WPROOT/wp-includes"
     # The updater refuses a target that is not a WordPress, and this is the
     # file it looks for; conf.d/main asserts the same one after unpacking.
-    printf '<?php $wp_version = %s;\n' "'7.1'" > "$WPROOT/wp-includes/version.php"
+    printf '<?php $wp_version = %s;\n' "'7.1.4'" > "$WPROOT/wp-includes/version.php"
     : > "$WPROOT/wp-config.php"
     : > "$WPROOT/index.php"
 
