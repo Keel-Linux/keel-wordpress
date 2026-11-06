@@ -253,3 +253,19 @@ PY
     code "$REPO/conf.d/main" | grep -qF 'include $SNIPPETS/keel-web-front.conf;" /etc/nginx/sites-available/default-anubis'
     [ "$(code "$REPO/conf.d/main" | grep -c 'keel-web 0.4.0 is the least')" -eq 2 ]
 }
+
+# On the read-only replica of a cloud pair a login cannot be recorded, and
+# the login page came back empty after a good password (BR2, 2026-11-06).
+@test "recipe: the replica notice is a must-use plugin of the image" {
+    f="$REPO/overlay/usr/share/keel-wordpress/mu-plugins/keel-replica.php"
+    [ -f "$f" ]
+    code "$REPO/conf.d/main" | grep -qF 'install -D -m 0644 /usr/share/keel-wordpress/mu-plugins/keel-replica.php'
+    grep -qF '"$WPROOT/wp-content/mu-plugins/keel-replica.php"' "$REPO/conf.d/main"
+    # it asks the server, shows the notice and refuses a login only when read only
+    grep -qF "get_var('SELECT @@global.read_only')" "$f"
+    grep -qF "add_filter('login_message'" "$f"
+    grep -qF "}, 100);" "$f"
+    grep -qF 'This node is the replica of a cloud pair.' "$f"
+    grep -qF "defined('ABSPATH') || exit;" "$f"
+}
+
