@@ -5,8 +5,11 @@
 # Keel Web, which answers 404 to everything but /keel-health.
 #
 # A replica is read-only and every event would fail to record that it ran,
-# so the job does nothing while the server says it is read-only. If the
-# server cannot be asked, the job runs and wp-cli reports the real error.
+# so the job runs only when keel does not say that the node is a replica
+# (/var/lib/keel/role) and the server answers that it takes writes (0). A
+# server that cannot be asked gets no run: at the first pairing of a cloud
+# replica the job ran in the seconds between read_only and the copy of the
+# primary, and mailed root the errors (BR2, 2026-11-06, keel 0.23.89).
 # The server is asked by wp-cli, with the account of wp-config.php: www-data
 # has no account of its own, the mysql client was refused, and the replica
 # of a cloud pair mailed root the errors of every run (BR2, 2026-11-06).
@@ -17,4 +20,4 @@
 # mark 40wordpress writes when the site is ready (WORDPRESS_READY of
 # lib/wordpress.sh).
 MAILTO=root
-*/5 * * * * www-data [ -e /var/www/.keel-wordpress-ready ] && [ "$(/usr/local/bin/wp --path=/var/www/wordpress eval 'echo (int) $GLOBALS["wpdb"]->get_var("SELECT @@global.read_only");' 2>/dev/null)" != 1 ] && /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now --quiet
+*/5 * * * * www-data [ -e /var/www/.keel-wordpress-ready ] && ! grep -qx role=replica /var/lib/keel/role 2>/dev/null && [ "$(/usr/local/bin/wp --path=/var/www/wordpress eval 'echo (int) $GLOBALS["wpdb"]->get_var("SELECT @@global.read_only");' 2>/dev/null)" = 0 ] && /usr/local/bin/wp --path=/var/www/wordpress cron event run --due-now --quiet

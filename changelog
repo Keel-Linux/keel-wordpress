@@ -1,3 +1,14 @@
+keel-wordpress-19.0 (20) keel; urgency=medium
+
+  * The cron job runs only when keel does not say that the node is a
+    replica (/var/lib/keel/role) and the server answers that it takes
+    writes (0). At the first pairing of a cloud advanced replica the job
+    ran in the seconds between read_only and the copy of the primary and
+    mailed root the errors of the events (BR2, 2026-11-06, keel 0.23.89).
+    A server that cannot be asked now gets no run.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 23:50:00 +0000
+
 keel-wordpress-19.0 (19) keel; urgency=medium
 
   * The site logs in to MariaDB over the socket as www-data, the user of
