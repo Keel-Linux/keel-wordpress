@@ -1,3 +1,14 @@
+keel-wordpress-19.0 (18) keel; urgency=medium
+
+  * The login page of the replica of a cloud pair says that the node is the
+    replica, its database read only, and a login is refused with that
+    message (the must-use plugin keel-replica.php). WordPress cannot record
+    a login on a read-only database, and the login page came back empty
+    after a good password (BR2, 2026-11-06). Nothing changes on the primary
+    or in the simple mode.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 06 Nov 2026 17:00:00 +0000
+
 keel-wordpress-19.0 (17) keel; urgency=medium
 
   * The cron job asks the server whether it is read-only through wp-cli,

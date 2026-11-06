@@ -103,6 +103,14 @@ chown -R "$WEB_USER:$WEB_USER" "$WPROOT"
 # one we pinned, this says the files in it are the ones WordPress published.
 keel-wp core verify-checksums --version="$WP_VERSION"
 
+# The notice of the replica (overlay/usr/share/keel-wordpress/mu-plugins):
+# on the read-only replica of a cloud pair a login cannot be recorded, and
+# the login page says so. A must-use plugin is loaded by WordPress with no
+# activation. It is installed after the checksums of WordPress, which do not
+# cover wp-content.
+install -D -m 0644 /usr/share/keel-wordpress/mu-plugins/keel-replica.php \
+    "$WPROOT/wp-content/mu-plugins/keel-replica.php"
+
 # No wp-config.php, and none is written here. Assert it, because the whole
 # point of this recipe is that the layer carries no credential.
 [ ! -e "$WPROOT/wp-config.php" ] || fatal "the layer must not carry a wp-config.php"
