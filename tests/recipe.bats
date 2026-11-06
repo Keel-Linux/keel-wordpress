@@ -107,28 +107,33 @@ code() {
 
 @test "recipe: the cron job waits for the mark of a ready site" {
     job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
-    [[ "$job" == *"www-data [ -e /var/www/.keel-wordpress-ready ] && ["* ]]
+    [[ "$job" == *"www-data [ -e /var/www/.keel-wordpress-ready ] && "* ]]
     grep -qx 'WORDPRESS_READY="${WORDPRESS_READY:-/var/www/.keel-wordpress-ready}"' \
         "$REPO/overlay/usr/lib/inithooks/lib/wordpress.sh"
 }
 
-@test "recipe: the cron job does nothing on a read-only server and runs when the server cannot be asked" {
+# The replica of a cloud advanced pair mailed root the errors of a run at
+# its first pairing (BR2, 2026-11-06, keel 0.23.89): the job ran at 23:25:01,
+# keel set read_only at 23:24:47 and replaced the schema with the copy of the
+# primary at 23:25:03. The job now runs only when keel does not say that the
+# node is a replica and the server answers that it takes writes (0). A server
+# that cannot be asked gets no run: its events would fail too.
+@test "recipe: the cron job runs only on a node that keel does not call a replica and whose server takes writes" {
     job=$(code "$REPO/overlay/etc/cron.d/wordpress-cron" | grep -E '^\*/5')
     [[ "$job" == *"SELECT @@global.read_only"* ]]
-    [[ "$job" == *'!= 1 ] && /usr/local/bin/wp'* ]]
-    # asked with the account of wp-config.php: www-data has none of its own
+    [[ "$job" == *"! grep -qx role=replica /var/lib/keel/role"* ]]
+    [[ "$job" == *'= 0 ] && /usr/local/bin/wp'* ]]
+    [[ "$job" != *'!= 1 ]'* ]]
+    # asked with the account of wp-config.php (www-data over the socket)
     [[ "$job" == *"/usr/local/bin/wp --path=/var/www/wordpress eval 'echo (int) \$GLOBALS[\"wpdb\"]->get_var(\"SELECT @@global.read_only\");'"* ]]
     [[ "$job" != *"/usr/bin/mysql"* ]]
     # the schedule part of the line is run by sh: the test of the guard
-    guard='[ "$(echo 1)" != 1 ]'
-    run sh -c "$guard"
+    run sh -c '[ "$(echo 1)" = 0 ]'
     [ "$status" -ne 0 ]
-    guard='[ "$(echo 0)" != 1 ]'
-    run sh -c "$guard"
+    run sh -c '[ "$(echo 0)" = 0 ]'
     [ "$status" -eq 0 ]
-    guard='[ "$(false)" != 1 ]'
-    run sh -c "$guard"
-    [ "$status" -eq 0 ]
+    run sh -c '[ "$(false)" = 0 ]'
+    [ "$status" -ne 0 ]
 }
 
 @test "recipe: no file of the overlay is an Apache file" {
