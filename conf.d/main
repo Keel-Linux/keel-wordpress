@@ -166,12 +166,18 @@ fi
 # keel-host-keys makes at the first boot, which a build does not have.
 ROUTE=/etc/nginx/keel-default.d/60-keel-wordpress.conf
 [ -f "$ROUTE" ] || fatal "$ROUTE is not in the image"
-grep -qxF '	include /etc/nginx/keel-default.d/*.conf;' /etc/nginx/sites-available/keel-default \
-    || fatal "the default site of keel-web does not include keel-default.d: keel-web 0.3.0 is the least"
+# Since keel-web 0.4.0 (decision 0079) each site includes a snippet, one
+# for port 80, port 443 and the loopback, and the snippet includes the
+# directory.
+SNIPPETS=/etc/nginx/snippets
+grep -qxF 'include /etc/nginx/keel-default.d/*.conf;' "$SNIPPETS/keel-web-site.conf" \
+    && grep -qxF "	include $SNIPPETS/keel-web-site.conf;" /etc/nginx/sites-available/keel-default \
+    || fatal "the default site of keel-web does not include keel-default.d: keel-web 0.4.0 is the least"
 FRONT=/etc/nginx/keel-front.d/60-keel-wordpress.conf
 [ -f "$FRONT" ] || fatal "$FRONT is not in the image"
-grep -qxF '	include /etc/nginx/keel-front.d/*.conf;' /etc/nginx/sites-available/default-anubis \
-    || fatal "the front site of keel-web does not include keel-front.d: keel-web 0.3.2 is the least"
+grep -qxF 'include /etc/nginx/keel-front.d/*.conf;' "$SNIPPETS/keel-web-front.conf" \
+    && grep -qxF "	include $SNIPPETS/keel-web-front.conf;" /etc/nginx/sites-available/default-anubis \
+    || fatal "the front site of keel-web does not include keel-front.d: keel-web 0.4.0 is the least"
 NGINX_TEST=/etc/nginx/keel-wordpress-test.conf
 cat > "$NGINX_TEST" <<'EOF'
 pid /run/keel-wordpress-test.pid;
