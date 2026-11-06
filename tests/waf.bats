@@ -88,7 +88,7 @@ rules() {
         printf '%s\n' "$good" | grep -qP "$re" || { echo "refused: $good"; return 1; }
     done
     for bad in 'example.org/x' 'a b' 'example.org:443:1' '[2001:db8::1' 'user@example.org'; do
-        ! printf '%s\n' "$bad" | grep -qP "$re" || { echo "taken: $bad"; return 1; }
+        if printf '%s\n' "$bad" | grep -qP "$re"; then echo "taken: $bad"; return 1; fi
     done
 }
 
