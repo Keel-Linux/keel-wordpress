@@ -296,6 +296,10 @@ define('FS_METHOD', 'direct');
 define('DISABLE_WP_CRON', true);
 define('AUTOMATIC_UPDATER_DISABLED', true);
 define('WP_AUTO_UPDATE_CORE', false);
+/* The admin and login pages link their styles and scripts as files of
+   wp-admin and wp-includes, never through load-styles.php or
+   load-scripts.php (CVE-2018-6389). */
+define('CONCATENATE_SCRIPTS', false);
 
 /* The address this appliance is reached by, decided per request. */
 define('KEEL_WP_FALLBACK_URL', $(wordpress_php_string "$site_url"));

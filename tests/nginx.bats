@@ -161,3 +161,15 @@ at() {
     grep -q 'keel-web 0.3.2' "$FRONT"
     grep -q 'keel-overlay-coraza 0.1.4' "$FRONT"
 }
+
+# Behind Anubis the front of Keel Web serves a static file from the disk
+# without the challenge, under the root that a file of
+# /etc/nginx/keel-static.d/ sets (keel-web 0.4.2). It is the root of the
+# route: the same files, and nothing else.
+@test "static: the layer sets the root of the static files of the front, the root of the route" {
+    local static="$REPO/overlay/etc/nginx/keel-static.d/60-keel-wordpress.conf"
+    [ -f "$static" ]
+    [ "$(grep -vE '^\s*(#|$)' "$static")" = "root /var/www/wordpress;" ]
+    route | grep -qF 'root /var/www/wordpress;'
+    grep -q 'keel-web 0.4.2' "$static"
+}
