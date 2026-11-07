@@ -64,6 +64,14 @@ jobs:
       # booted, and the exemption becomes an error when the layer is
       # published, so the line then must go.
       allow_unpublished: true
+  commission:
+    # The commissioning contract, tests/commission.yaml (handbook decision
+    # 0075): keel-commission --check of Keel-Linux/.github reads it and says
+    # whether it is valid, so the appliance cannot leave it out. It runs no
+    # machine; the passes on BR1 and BR2 are the release gate's. Check
+    # "commission / contract".
+    runs-on: keel-host
+    uses: keel-linux/.github/.github/workflows/commission-contract.yml@main
   package:
     # Only on a pull request. require-changelog compares the two commits of the
     # pull request, which it reads from github.event.pull_request.base.sha;

@@ -252,9 +252,12 @@ Core. 3306 is **closed** to the network: this appliance reaches its own
 database over the loopback, and ``wp-config.php`` names ``[::1]``. On a pair
 the manifest of lnmp makes 3306 a mesh port, open on the WireGuard interface
 only. ``/etc/cron.d/wordpress-cron`` runs the due events with ``wp cron event
-run`` as the web user: on the loopback addresses, port 80 is the health probe of
-Keel Web and answers 404 to everything else, so a request to ``wp-cron.php``
-there never reaches WordPress.
+run`` as the web user, not through a request to ``wp-cron.php``. Port 80 serves
+the site as 443 does while the certificate is the self-signed one of the first
+boot, and redirects to HTTPS when a certificate authority's is in place
+(keel-web 0.4.0, handbook decision 0079). The loopback addresses of port 80
+always serve the site, so ``http://127.0.0.1/`` reaches WordPress on the
+machine; ``/keel-health`` there is Keel Web's probe.
 
 Adminer and the rest of ``turnkey/lamp`` are left out. The database is
 administered through ``webmin-mysql`` in the panel Core already carries. The
