@@ -1,3 +1,18 @@
+keel-wordpress-19.0 (21) keel; urgency=medium
+
+  * wp-config.php sets CONCATENATE_SCRIPTS false: the login and admin
+    pages link the styles and scripts of wp-admin and wp-includes as
+    files, never through load-styles.php or load-scripts.php, which are
+    PHP and a known load target (CVE-2018-6389). Behind Anubis, a PHP
+    path gets the challenge; a cloud replica showed its login page with
+    no style (BR2, 2026-11-07). An existing machine keeps its
+    wp-config.php.
+  * /etc/nginx/keel-static.d/60-keel-wordpress.conf gives the front of
+    keel-web 0.4.2 the root of the static files, /var/www/wordpress: a
+    static file on the disk passes the front without the challenge.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Sat, 07 Nov 2026 12:00:00 +0000
+
 keel-wordpress-19.0 (20) keel; urgency=medium
 
   * The cron job runs only when keel does not say that the node is a

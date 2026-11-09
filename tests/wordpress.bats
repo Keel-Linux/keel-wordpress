@@ -246,6 +246,15 @@ setup() {
     [[ "$output" == *"define('WP_AUTO_UPDATE_CORE', false);"* ]]
 }
 
+@test "config_php has WordPress link its admin styles and scripts as files, not through load-styles.php" {
+    # load-styles.php and load-scripts.php are PHP, a known load target
+    # (CVE-2018-6389), and behind Anubis a PHP path gets the challenge.
+    # With CONCATENATE_SCRIPTS false the login and admin pages link the
+    # files of wp-admin and wp-includes, which Nginx serves from the disk.
+    run wordpress_config_php wordpress localhost wp_ "https://x.example.org"
+    [[ "$output" == *"define('CONCATENATE_SCRIPTS', false);"* ]]
+}
+
 @test "config_php refuses an empty host, prefix or url" {
     run wordpress_config_php wordpress "" wp_ "https://x"
     [ "$status" -ne 0 ]
