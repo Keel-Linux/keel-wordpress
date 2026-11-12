@@ -49,9 +49,10 @@ overlays:
 secrets:
   root_password:
     file: /etc/keel/secrets/root_password
-  # Renders to DB_PASS: 40wordpress gives it to the 'wordpress' database
-  # account and writes it into wp-config.php. The lnmp layer's 35mysqlpass
-  # gives it to the same account, which app.options.db_user names.
+  # Renders to DB_PASS: the lnmp layer's 35mysqlpass gives it to the
+  # 'wordpress' account, which app.options.db_user names. The site does not
+  # use it: it logs in over the socket as www-data with no password, and
+  # wp-config.php holds no password.
   db_password:
     file: /etc/keel/secrets/db_password
   # Renders to APP_PASS: the WordPress administrator. The boot test logs in

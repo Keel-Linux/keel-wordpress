@@ -132,12 +132,16 @@ What it proves, in order:
 8. **Not the installer**: the page carries none of the four markers of the
    WordPress installer or of its "there is no wp-config.php" screen, and it
    does carry something only a served WordPress page has.
-9. **wp-config.php**: it names the `wordpress` database and the `wordpress`
-   account, points at the local database, carries the declared
-   `secrets.db_password` and none of upstream's build time values.
-10. **The database**: from inside the container, with the secret the container
-    already holds, the `wordpress` account connects on `[::1]:3306` and the
-    database and its `wp_users` table are both there.
+9. **wp-config.php**: it names the `wordpress` database, the socket account
+   `www-data` (`root` when wp-cli runs as root), an empty password and the
+   host `localhost`, and it holds no salt and not the declared
+   `secrets.db_password`. The site logs in over the socket with no password,
+   and the salts are options of the database (decision of 2026-11-06).
+10. **The database**: from inside the container, `www-data` logs in over the
+    socket with no password and the database and its `wp_users` table are
+    both there. Then the lnmp account `wordpress` (`app.options.db_user`)
+    connects on `[::1]:3306` with the `secrets.db_password` the container
+    already holds, so the declared password reached the database.
 11. **The login**: a POST to `wp-login.php` with the declared password gets a
     redirect and a `wordpress_logged_in_` cookie; `/wp-admin/` then answers 200
     with the dashboard for that cookie; and a wrong password is refused with
