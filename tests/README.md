@@ -148,9 +148,10 @@ What it proves, in order:
     the form and no cookie. Fetching the login page proves nothing, and a check
     that only ever tries the right password cannot tell a working login from a
     site that lets anybody in.
-12. **The files of the update path**: the shipped `keel.sources` is enabled,
-    names the signed `trixie` and `trixie-testing` suites and a keyring that
-    the keys package installs, and none of the files the build used to reach
+12. **The files of the update path**: the shipped `keel.sources` names the
+    signed `trixie` and `trixie-testing` suites and a keyring that the keys
+    package installs, `trixie` is enabled, and `trixie-testing` may be off
+    (Core ships it off until the operator turns it on), and none of the files the build used to reach
     the project packages is left in the image. The proofs that ask the archive
     over the network (`apt-get update`, the pin of 990, a download, a
     reinstall) are not in this test. The runner of the image gate has no route

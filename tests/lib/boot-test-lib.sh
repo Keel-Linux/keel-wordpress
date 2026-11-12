@@ -603,21 +603,37 @@ bt_word_in() {
 
 bt_sources_verdict() {
     # bt_sources_verdict FILE: the appliance's own APT sources, as Core ships
-    # them: each stanza enabled, a signed suite of ours, our keyring, and
-    # never a staging one.
-    local sources=$1 field value
-    while read -r field value; do
+    # them: each stanza a signed suite of ours with our keyring, never a
+    # staging one, and Enabled yes or no. The stable suite must be enabled.
+    # Core ships the testing suite off until the operator turns it on
+    # (common 9aaabc6), so a testing stanza with Enabled: no is correct.
+    local sources=$1 field value suite="" enabled="" stable_on=0
+    while read -r field value || [ -n "$field" ]; do
         case "$field" in
-            Enabled:) [ "$value" = yes ] || {
-                echo "boot-test: $sources is not enabled" >&2; return 1; } ;;
+            "")
+                # the blank line that ends a stanza
+                [ "$suite" = "$BT_ARCHIVE_SUITE" ] && [ "$enabled" = yes ] && stable_on=1
+                suite="" enabled="" ;;
+            Enabled:)
+                case "$value" in
+                    yes|no) enabled=$value ;;
+                    *) echo "boot-test: $sources says Enabled: '$value', not yes or no" >&2; return 1 ;;
+                esac ;;
             URIs:) [ "$value" = "$BT_ARCHIVE_URI" ] || {
                 echo "boot-test: $sources names '$value', not $BT_ARCHIVE_URI" >&2; return 1; } ;;
             Suites:) bt_word_in "$BT_ARCHIVE_SUITES" "$value" || {
-                echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1; } ;;
+                echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1; }
+                suite=$value ;;
             Signed-By:) bt_word_in "$BT_ARCHIVE_KEYRINGS" "$value" || {
                 echo "boot-test: $sources is signed by '$value', not one of $BT_ARCHIVE_KEYRINGS" >&2; return 1; } ;;
         esac
     done < "$sources"
+    # the last stanza ends at the end of the file
+    [ "$suite" = "$BT_ARCHIVE_SUITE" ] && [ "$enabled" = yes ] && stable_on=1
+    if [ "$stable_on" -ne 1 ]; then
+        echo "boot-test: $sources: the stable suite $BT_ARCHIVE_SUITE is not enabled" >&2
+        return 1
+    fi
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
 }
 

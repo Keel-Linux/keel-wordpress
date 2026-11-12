@@ -659,10 +659,88 @@ EOF
     [[ "$output" == *"is enabled and verified with"* ]]
 }
 
+# The stable stanza of _sources, then a second stanza: _testing ENABLED KEYRING
+_testing() {
+    _sources
+    cat >> "$S/keel.sources" <<EOF
+
+Types: deb
+URIs: https://archive.keellinux.org
+Suites: trixie-testing
+Components: main
+Enabled: ${1:-no}
+Signed-By: ${2:-/usr/share/keyrings/keel-testing-keyring.gpg}
+EOF
+}
+
 @test "sources_verdict accepts the testing suite signed by the testing key" {
-    _sources https://archive.keellinux.org trixie-testing yes /usr/share/keyrings/keel-testing-keyring.gpg
+    # Arrange
+    _testing yes /usr/share/keyrings/keel-testing-keyring.gpg
+
+    # Act
     run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
     [ "$status" -eq 0 ]
+}
+
+@test "sources_verdict passes on the file Core ships, with the testing suite off" {
+    # Arrange: the comments and the two stanzas of common's keel.sources
+    {
+        printf '# Keel Linux packages, from the Keel repository.\n#\n'
+        printf '# trixie-testing is the testing track, off unless the operator turns it on.\n'
+    } > "$S/head"
+    _testing no
+    cat "$S/head" "$S/keel.sources" > "$S/core.sources"
+
+    # Act
+    run bt_sources_verdict "$S/core.sources"
+
+    # Assert
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"trixie is enabled and verified with"* ]]
+}
+
+@test "sources_verdict refuses a file whose only enabled suite is testing" {
+    # Arrange
+    _sources https://archive.keellinux.org trixie no
+    cat >> "$S/keel.sources" <<EOF
+
+Suites: trixie-testing
+Enabled: yes
+EOF
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the stable suite trixie is not enabled"* ]]
+}
+
+@test "sources_verdict refuses an Enabled value that is not yes or no" {
+    # Arrange
+    _testing maybe
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Enabled: 'maybe', not yes or no"* ]]
+}
+
+@test "sources_verdict reads the last line of a file with no newline at its end" {
+    # Arrange
+    _sources
+    printf 'Signed-By: /usr/share/keyrings/other.gpg' >> "$S/keel.sources"
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is signed by '/usr/share/keyrings/other.gpg'"* ]]
 }
 
 @test "sources_verdict accepts the keyring in either of the two formats that Core ships" {
