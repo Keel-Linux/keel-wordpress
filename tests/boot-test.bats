@@ -334,78 +334,214 @@ EOF
 
 # --- wp-config.php ----------------------------------------------------------
 
+# The wp-config.php 40wordpress writes, with one field replaced when the
+# test names it: _config FIELD LINE, or no argument for the file as written.
 _config() {
-    cat > "$S/wp-config.php" <<EOF
-<?php
-define('DB_NAME', '${1:-wordpress}');
-define('DB_USER', '${2:-wordpress}');
-define('DB_PASSWORD', '${3:-a-real-password}');
-define('DB_HOST', '${4:-[::1]}');
-EOF
+    local name="define('DB_NAME', 'wordpress');"
+    local user
+    user=$(bt_db_user_line www-data)
+    local pass="define('DB_PASSWORD', '');"
+    local host="define('DB_HOST', 'localhost');"
+    case "${1-}" in
+        DB_NAME) name=$2 ;;
+        DB_USER) user=$2 ;;
+        DB_PASSWORD) pass=$2 ;;
+        DB_HOST) host=$2 ;;
+    esac
+    printf '%s\n' '<?php' "$name" "$user" "$pass" "$host" \
+        "define('DB_CHARSET', 'utf8mb4');" "\$table_prefix = 'wp_';" \
+        "${3-}" > "$S/wp-config.php"
 }
 
-@test "config_verdict passes on a config that names the local database" {
+@test "db_user_line is the socket account of the login, and root for wp-cli" {
+    # Arrange
+    local want="define('DB_USER', (function_exists('posix_geteuid') && posix_geteuid() === 0) ? 'root' : 'www-data');"
+
+    # Act
+    run bt_db_user_line www-data
+
+    # Assert
+    [ "$status" -eq 0 ]
+    [ "$output" = "$want" ]
+}
+
+@test "config_verdict passes on the wp-config.php the image writes" {
+    # Arrange
     _config
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
     [ "$status" -eq 0 ]
-    [[ "$output" == *"names 'wordpress' as 'wordpress'"* ]]
+    [[ "$output" == *"names 'wordpress' as 'www-data' over the local socket, with no password and no salt"* ]]
 }
 
-@test "config_verdict accepts the IPv4 loopback and the socket" {
-    _config wordpress wordpress pass 127.0.0.1
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 0 ]
-    _config wordpress wordpress pass localhost
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 0 ]
-}
-
-@test "config_verdict refuses a remote database host" {
-    _config wordpress wordpress pass db.example.org
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"does not point at the local database"* ]]
-}
-
-@test "config_verdict refuses the upstream build time password" {
-    _config wordpress wordpress turnkey
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"upstream build time password"* ]]
-    # an empty password is the other value upstream's build left behind
-    cat > "$S/wp-config.php" <<EOF
-<?php
-define('DB_NAME', 'wordpress');
-define('DB_USER', 'wordpress');
-define('DB_PASSWORD', '');
-define('DB_HOST', '[::1]');
-EOF
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"upstream build time password"* ]]
-}
-
-@test "config_verdict refuses another database or account, and a missing field" {
-    _config other wordpress
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"does not name the database"* ]]
-    _config wordpress someone
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"does not name the account"* ]]
+@test "config_verdict refuses a file that misses a field" {
+    # Arrange
     printf "<?php\ndefine('DB_NAME', 'wordpress');\n" > "$S/wp-config.php"
-    run bt_config_verdict "$S/wp-config.php" wordpress wordpress
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
     [ "$status" -eq 1 ]
     [[ "$output" == *"has no DB_USER"* ]]
 }
 
-@test "password_in_config compares the declared password with the one in the file" {
-    _config wordpress wordpress 'S3cret-value'
+@test "config_verdict refuses another database" {
+    # Arrange
+    _config DB_NAME "define('DB_NAME', 'other');"
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not name the database 'wordpress'"* ]]
+}
+
+@test "config_verdict refuses the password account of the old hook" {
+    # Arrange
+    _config DB_USER "define('DB_USER', 'wordpress');"
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not name the socket account 'www-data'"* ]]
+}
+
+@test "config_verdict refuses a DB_USER that is root for every process" {
+    # Arrange
+    _config DB_USER "define('DB_USER', 'root');"
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not name the socket account"* ]]
+}
+
+@test "config_verdict refuses the socket form of another login" {
+    # Arrange
+    _config DB_USER "$(bt_db_user_line nobody)"
+
+    # Act
+    run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not name the socket account 'www-data'"* ]]
+}
+
+@test "config_verdict refuses any database password, the upstream one too" {
+    local value
+    for value in turnkey a-real-password; do
+        # Arrange
+        _config DB_PASSWORD "define('DB_PASSWORD', '$value');"
+
+        # Act
+        run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+        # Assert
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"carries a database password"* ]]
+    done
+}
+
+@test "config_verdict refuses a TCP host, where the socket account cannot log in" {
+    local value
+    for value in '[::1]' 127.0.0.1 db.example.org; do
+        # Arrange
+        _config DB_HOST "define('DB_HOST', '$value');"
+
+        # Act
+        run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+        # Assert
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"does not point at the socket of the local database"* ]]
+    done
+}
+
+@test "config_verdict refuses a salt in the file, because the salts are options of the database" {
+    local name
+    for name in AUTH_KEY SECURE_AUTH_SALT LOGGED_IN_KEY NONCE_SALT; do
+        # Arrange
+        _config "" "" "define('$name', 'x');"
+
+        # Act
+        run bt_config_verdict "$S/wp-config.php" www-data wordpress
+
+        # Assert
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"defines a salt"* ]]
+    done
+}
+
+@test "password_in_config finds the declared password anywhere in the file" {
+    # Arrange
+    _config "" "" "/* S3cret-value */"
+
+    # Act and assert
     bt_password_in_config "$S/wp-config.php" 'S3cret-value'
-    run ! bt_password_in_config "$S/wp-config.php" 'something-else'
-    printf "<?php\n" > "$S/wp-config.php"
+    _config DB_PASSWORD "define('DB_PASSWORD', 'S3cret-value');"
+    bt_password_in_config "$S/wp-config.php" 'S3cret-value'
+}
+
+@test "password_in_config is false for a file without the password" {
+    # Arrange
+    _config
+
+    # Act and assert
     run ! bt_password_in_config "$S/wp-config.php" 'S3cret-value'
+}
+
+@test "password_in_config never finds an empty password" {
+    # Arrange
+    _config
+
+    # Act and assert
+    run ! bt_password_in_config "$S/wp-config.php" ''
+}
+
+@test "password_in_config is false for a file it cannot read" {
+    # Arrange: no file at all
+
+    # Act and assert
+    run ! bt_password_in_config "$S/missing.php" 'S3cret-value'
+}
+
+# --- the socket account -----------------------------------------------------
+
+@test "socket_account_verdict passes when the web user reaches the database and its table" {
+    # Arrange
+    local report="www-data@localhost"$'\t'1$'\t'1
+
+    # Act
+    run bt_socket_account_verdict "$report" www-data wordpress
+
+    # Assert
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"www-data reaches the database 'wordpress' and its wp_users table over the socket"* ]]
+}
+
+@test "socket_account_verdict refuses another account, a missing schema or a missing table" {
+    local report
+    for report in "wordpress@localhost"$'\t'1$'\t'1 \
+            "www-data@localhost"$'\t'0$'\t'0 \
+            "www-data@localhost"$'\t'1$'\t'0 \
+            ""; do
+        # Act
+        run bt_socket_account_verdict "$report" www-data wordpress
+
+        # Assert
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"www-data over the socket got"* ]]
+    done
 }
 
 # --- the login verdicts -----------------------------------------------------
@@ -523,10 +659,88 @@ EOF
     [[ "$output" == *"is enabled and verified with"* ]]
 }
 
+# The stable stanza of _sources, then a second stanza: _testing ENABLED KEYRING
+_testing() {
+    _sources
+    cat >> "$S/keel.sources" <<EOF
+
+Types: deb
+URIs: https://archive.keellinux.org
+Suites: trixie-testing
+Components: main
+Enabled: ${1:-no}
+Signed-By: ${2:-/usr/share/keyrings/keel-testing-keyring.gpg}
+EOF
+}
+
 @test "sources_verdict accepts the testing suite signed by the testing key" {
-    _sources https://archive.keellinux.org trixie-testing yes /usr/share/keyrings/keel-testing-keyring.gpg
+    # Arrange
+    _testing yes /usr/share/keyrings/keel-testing-keyring.gpg
+
+    # Act
     run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
     [ "$status" -eq 0 ]
+}
+
+@test "sources_verdict passes on the file Core ships, with the testing suite off" {
+    # Arrange: the comments and the two stanzas of common's keel.sources
+    {
+        printf '# Keel Linux packages, from the Keel repository.\n#\n'
+        printf '# trixie-testing is the testing track, off unless the operator turns it on.\n'
+    } > "$S/head"
+    _testing no
+    cat "$S/head" "$S/keel.sources" > "$S/core.sources"
+
+    # Act
+    run bt_sources_verdict "$S/core.sources"
+
+    # Assert
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"trixie is enabled and verified with"* ]]
+}
+
+@test "sources_verdict refuses a file whose only enabled suite is testing" {
+    # Arrange
+    _sources https://archive.keellinux.org trixie no
+    cat >> "$S/keel.sources" <<EOF
+
+Suites: trixie-testing
+Enabled: yes
+EOF
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the stable suite trixie is not enabled"* ]]
+}
+
+@test "sources_verdict refuses an Enabled value that is not yes or no" {
+    # Arrange
+    _testing maybe
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Enabled: 'maybe', not yes or no"* ]]
+}
+
+@test "sources_verdict reads the last line of a file with no newline at its end" {
+    # Arrange
+    _sources
+    printf 'Signed-By: /usr/share/keyrings/other.gpg' >> "$S/keel.sources"
+
+    # Act
+    run bt_sources_verdict "$S/keel.sources"
+
+    # Assert
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is signed by '/usr/share/keyrings/other.gpg'"* ]]
 }
 
 @test "sources_verdict accepts the keyring in either of the two formats that Core ships" {

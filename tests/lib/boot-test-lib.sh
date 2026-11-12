@@ -37,6 +37,12 @@ BT_INITHOOKS_DROPIN="etc/systemd/system/inithooks.service.d/container.conf"
 # test reads back.
 BT_WP_ROOT="var/www/wordpress"
 BT_WP_CONFIG="$BT_WP_ROOT/wp-config.php"
+# The database of the site and the account the site logs in as: the web user
+# over the socket, with no password (unix_socket). The lnmp account that
+# app.options.db_user names and secrets.db_password opens is not the site's.
+BT_WP_DB_NAME="wordpress"
+BT_WP_DB_LOGIN="www-data"
+BT_LNMP_DB_USER="wordpress"
 # The project's own APT archive, and the keyring it must be verified with.
 BT_ARCHIVE_URI="https://archive.keellinux.org"
 BT_ARCHIVE_SUITE="trixie"
@@ -69,8 +75,10 @@ then proves, in this order:
 
   the site answers 200 over IPv6 on port 80 and on port 443
   the answer is a WordPress site and not the WordPress installer
-  wp-config.php names the local database and carries no build time password
-  the wordpress database and the wordpress database account exist
+  wp-config.php names the database and the socket account www-data, with no
+    password, no salt and no declared secret
+  the web user reaches the wordpress database over the socket, and the lnmp
+    account 'wordpress' logs in with the declared db_password
   the administrator logs in over HTTP with the declared app_password, and a
     wrong password is refused
   the check page, a pretty permalink and the REST API answer, and the
@@ -433,37 +441,62 @@ bt_no_apache_verdict() {
     echo "boot-test: no Apache in the image"
 }
 
+bt_db_user_line() {
+    # bt_db_user_line LOGIN: the DB_USER line that 40wordpress writes. The
+    # site logs in over the socket as LOGIN (unix_socket), and wp-cli, which
+    # runs as root, logs in as root over the same socket (decision of
+    # 2026-11-06).
+    printf "define('DB_USER', (function_exists('posix_geteuid') && posix_geteuid() === 0) ? 'root' : '%s');\n" "$1"
+}
+
 bt_config_verdict() {
-    # bt_config_verdict FILE APP_DB_USER DB_NAME: wp-config.php names the
-    # local database and this appliance's account, and carries none of the
-    # values upstream's build time installation left in it.
-    local config=$1 db_user=$2 db_name=$3 field
+    # bt_config_verdict FILE LOGIN DB_NAME: wp-config.php names the database,
+    # the socket account of LOGIN, no password and the socket of the local
+    # server, and holds no salt. unix_socket works over the socket only, so
+    # 'localhost' is the one host that is correct; [::1] or 127.0.0.1 would
+    # send the login over TCP, where it fails.
+    local config=$1 login=$2 db_name=$3 field
     for field in DB_NAME DB_USER DB_PASSWORD DB_HOST; do
         grep -qE "^define\('$field'," "$config" \
             || { echo "boot-test: wp-config.php has no $field" >&2; return 1; }
     done
     grep -qE "^define\('DB_NAME', *'$db_name'\);" "$config" \
         || { echo "boot-test: wp-config.php does not name the database '$db_name'" >&2; return 1; }
-    grep -qE "^define\('DB_USER', *'$db_user'\);" "$config" \
-        || { echo "boot-test: wp-config.php does not name the account '$db_user'" >&2; return 1; }
-    grep -qE "^define\('DB_HOST', *'(\[::1\]|127\.0\.0\.1|localhost)'\);" "$config" \
-        || { echo "boot-test: wp-config.php does not point at the local database" >&2; return 1; }
-    if grep -qE "^define\('DB_PASSWORD', *'(turnkey|)'\);" "$config"; then
-        echo "boot-test: wp-config.php carries the upstream build time password" >&2
+    grep -qxF "$(bt_db_user_line "$login")" "$config" \
+        || { echo "boot-test: wp-config.php does not name the socket account '$login' (root for wp-cli)" >&2; return 1; }
+    grep -qxF "define('DB_PASSWORD', '');" "$config" \
+        || { echo "boot-test: wp-config.php carries a database password: the socket account has none" >&2; return 1; }
+    grep -qxF "define('DB_HOST', 'localhost');" "$config" \
+        || { echo "boot-test: wp-config.php does not point at the socket of the local database" >&2; return 1; }
+    if grep -qE "^define\('(AUTH|SECURE_AUTH|LOGGED_IN|NONCE)_(KEY|SALT)'," "$config"; then
+        echo "boot-test: wp-config.php defines a salt: the salts are options of the database" >&2
         return 1
     fi
-    echo "boot-test: wp-config.php names '$db_name' as '$db_user' on the local database"
+    echo "boot-test: wp-config.php names '$db_name' as '$login' over the local socket, with no password and no salt"
 }
 
 bt_password_in_config() {
-    # bt_password_in_config FILE PASS: true when the declared password is the
-    # one wp-config.php carries. The password is compared in the shell, so it
-    # never becomes an argument of grep, which every process on the machine
-    # could read while it ran.
-    local config=$1 pass=$2 line
-    line=$(sed -n "s|^define('DB_PASSWORD', '\\(.*\\)');\$|\\1|p" "$config" | head -1)
-    [ -n "$line" ] || return 1
-    [ "$line" = "$pass" ]
+    # bt_password_in_config FILE PASS: true when PASS is anywhere in
+    # wp-config.php. The file is read into the shell and compared there, so
+    # the password never becomes an argument of grep, which every process on
+    # the machine could read while it ran. An empty PASS is never found.
+    local config=$1 pass=$2 content
+    [ -n "$pass" ] || return 1
+    content=$(< "$config") || return 1
+    [[ $content == *"$pass"* ]]
+}
+
+bt_socket_account_verdict() {
+    # bt_socket_account_verdict REPORT LOGIN DB_NAME: REPORT is what LOGIN got
+    # over the socket for CURRENT_USER(), the number of schemas named DB_NAME
+    # and the number of wp_users tables in it, tab separated. That is the
+    # login the site itself makes: no password, unix_socket.
+    local report=$1 login=$2 db_name=$3
+    if [ "$report" != "$login@localhost"$'\t'1$'\t'1 ]; then
+        echo "boot-test: $login over the socket got '$report', not $login@localhost with the database '$db_name' and its wp_users table" >&2
+        return 1
+    fi
+    echo "boot-test: $login reaches the database '$db_name' and its wp_users table over the socket, with no password"
 }
 
 bt_login_verdict() {
@@ -570,21 +603,37 @@ bt_word_in() {
 
 bt_sources_verdict() {
     # bt_sources_verdict FILE: the appliance's own APT sources, as Core ships
-    # them: each stanza enabled, a signed suite of ours, our keyring, and
-    # never a staging one.
-    local sources=$1 field value
-    while read -r field value; do
+    # them: each stanza a signed suite of ours with our keyring, never a
+    # staging one, and Enabled yes or no. The stable suite must be enabled.
+    # Core ships the testing suite off until the operator turns it on
+    # (common 9aaabc6), so a testing stanza with Enabled: no is correct.
+    local sources=$1 field value suite="" enabled="" stable_on=0
+    while read -r field value || [ -n "$field" ]; do
         case "$field" in
-            Enabled:) [ "$value" = yes ] || {
-                echo "boot-test: $sources is not enabled" >&2; return 1; } ;;
+            "")
+                # the blank line that ends a stanza
+                [ "$suite" = "$BT_ARCHIVE_SUITE" ] && [ "$enabled" = yes ] && stable_on=1
+                suite="" enabled="" ;;
+            Enabled:)
+                case "$value" in
+                    yes|no) enabled=$value ;;
+                    *) echo "boot-test: $sources says Enabled: '$value', not yes or no" >&2; return 1 ;;
+                esac ;;
             URIs:) [ "$value" = "$BT_ARCHIVE_URI" ] || {
                 echo "boot-test: $sources names '$value', not $BT_ARCHIVE_URI" >&2; return 1; } ;;
             Suites:) bt_word_in "$BT_ARCHIVE_SUITES" "$value" || {
-                echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1; } ;;
+                echo "boot-test: $sources names the suite '$value', not one of $BT_ARCHIVE_SUITES" >&2; return 1; }
+                suite=$value ;;
             Signed-By:) bt_word_in "$BT_ARCHIVE_KEYRINGS" "$value" || {
                 echo "boot-test: $sources is signed by '$value', not one of $BT_ARCHIVE_KEYRINGS" >&2; return 1; } ;;
         esac
     done < "$sources"
+    # the last stanza ends at the end of the file
+    [ "$suite" = "$BT_ARCHIVE_SUITE" ] && [ "$enabled" = yes ] && stable_on=1
+    if [ "$stable_on" -ne 1 ]; then
+        echo "boot-test: $sources: the stable suite $BT_ARCHIVE_SUITE is not enabled" >&2
+        return 1
+    fi
     echo "boot-test: $BT_ARCHIVE_URI $BT_ARCHIVE_SUITE is enabled and verified with $BT_ARCHIVE_KEYRING"
 }
 

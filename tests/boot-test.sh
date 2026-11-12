@@ -13,11 +13,12 @@
 #      there (/keel-check/ is a 404 of WordPress), a pretty permalink and the
 #      REST API work, and wp-config.php, PHP in the uploads and the PHP files
 #      of wp-includes and hidden files are refused
-#   3. wp-config.php names the local database, the appliance's own account and
-#      the password the instance description declared, and none of upstream's
-#      build time values
-#   4. the database and the database account exist, and that account can log
-#      in to the database with the declared password
+#   3. wp-config.php names the database, the socket account of the web user
+#      (root for wp-cli), no password and the local socket, and holds no salt
+#      and not the declared secrets.db_password (decision of 2026-11-06)
+#   4. the web user logs in over the socket with no password and reaches the
+#      database and its tables, and the lnmp account that
+#      app.options.db_user names logs in with the declared db_password
 #   5. the administrator logs in over HTTP with the declared app_password and
 #      is given a session cookie, a wrong password is refused, and the
 #      dashboard comes back for the session
@@ -173,22 +174,40 @@ bt_status_verdict "/wp-content/uploads/x.php" 403 "$(route_code /wp-content/uplo
 bt_status_verdict "/wp-includes/version.php" 403 "$(route_code /wp-includes/version.php)"
 bt_status_verdict "/.git/config" 403 "$(route_code /.git/config)"
 
-# 8. wp-config.php: what it names, and that it carries the declared password.
-#    The rootfs copy is read, because what the appliance runs on is what has to
-#    be right, and the comparison happens in the shell so the password never
-#    becomes an argument.
+# 8. wp-config.php: what it names, and that it holds no secret. The site logs
+#    in over the socket as the web user with no password, and the salts are
+#    options of the database (decision of 2026-11-06), so the declared
+#    secrets.db_password must not be in the file. The rootfs copy is read,
+#    because what the appliance runs on is what has to be right, and the
+#    comparison happens in the shell so the password never becomes an
+#    argument.
 config=$BT_ROOTFS/$BT_WP_CONFIG
 [ -r "$config" ] || { echo "boot-test: no $BT_WP_CONFIG in the rootfs" >&2; exit 1; }
-bt_config_verdict "$config" wordpress wordpress
+bt_config_verdict "$config" "$BT_WP_DB_LOGIN" "$BT_WP_DB_NAME"
 if bt_password_in_config "$config" "$(cat "$BT_ROOTFS/etc/keel/secrets/db_password")"; then
-    echo "boot-test: wp-config.php carries the declared secrets.db_password"
-else
-    echo "boot-test: wp-config.php does not carry the declared secrets.db_password" >&2
+    echo "boot-test: wp-config.php carries the declared secrets.db_password" >&2
     exit 1
 fi
+echo "boot-test: wp-config.php does not carry the declared secrets.db_password"
 
-# 9. The database and the account, asked of the database rather than of a file,
-#    from inside the container with the secret the container already holds.
+# 9. The database and the accounts, asked of the database rather than of a
+#    file, from inside the container. First the login the site makes: the web
+#    user over the socket, with no password.
+socket_report=$(inside "
+    runuser -u $BT_WP_DB_LOGIN -- mysql --protocol=socket --batch \
+        --skip-column-names --execute=\"
+            SELECT CURRENT_USER(),
+                   (SELECT COUNT(*) FROM information_schema.schemata
+                     WHERE schema_name = '$BT_WP_DB_NAME'),
+                   (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = '$BT_WP_DB_NAME'
+                       AND table_name = 'wp_users')\"
+") || { echo "boot-test: $BT_WP_DB_LOGIN cannot log in over the socket" >&2; exit 1; }
+bt_socket_account_verdict "$socket_report" "$BT_WP_DB_LOGIN" "$BT_WP_DB_NAME"
+
+#    Then the account of lnmp's 35mysqlpass, which app.options.db_user names,
+#    with the secrets.db_password the container already holds: the declared
+#    password reached the database.
 db_report=$(inside '
     export MYSQL_PWD=$(cat /etc/keel/secrets/db_password)
     mysql --user=wordpress --host=::1 --port=3306 --protocol=TCP --batch \
@@ -199,10 +218,10 @@ db_report=$(inside '
                    (SELECT COUNT(*) FROM information_schema.tables
                      WHERE table_schema = '"'"'wordpress'"'"'
                        AND table_name = '"'"'wp_users'"'"')"
-') || { echo "boot-test: the wordpress account cannot reach its database over [::1]:3306" >&2; exit 1; }
+') || { echo "boot-test: the lnmp account wordpress cannot log in over [::1]:3306 with the declared secrets.db_password" >&2; exit 1; }
 echo "boot-test: the database answered: $db_report"
 case "$db_report" in
-    wordpress@*$'\t'1$'\t'1) echo "boot-test: the wordpress database, the wp_users table and the wordpress account all exist" ;;
+    wordpress@*$'\t'1$'\t'1) echo "boot-test: the lnmp account wordpress logs in with the declared secrets.db_password and sees the wordpress database and its wp_users table" ;;
     *) echo "boot-test: the database is not in the state the first boot should have left ($db_report)" >&2; exit 1 ;;
 esac
 

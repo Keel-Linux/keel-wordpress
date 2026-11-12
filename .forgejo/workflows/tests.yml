@@ -58,12 +58,6 @@ jobs:
       # published manifest records.
       parent: lnmp
       timeout: 60
-      # No layer of this appliance is on the mirror yet (decision 0059: it
-      # moves to the current stack first). Without this line the job fails
-      # on every pull request. The job summary says that nothing was
-      # booted, and the exemption becomes an error when the layer is
-      # published, so the line then must go.
-      allow_unpublished: true
   commission:
     # The commissioning contract, tests/commission.yaml (handbook decision
     # 0075): keel-commission --check of Keel-Linux/.github reads it and says
