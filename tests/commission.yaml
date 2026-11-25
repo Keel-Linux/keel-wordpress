@@ -93,20 +93,15 @@ forbidden:
   - {kind: mysql-database, name: keel_check}
   - {kind: hook, name: 40lnmp-check}
 # The web pages of the gallery (decision 0075): the site, the backend
-# before and after the login with the app secret, and Webmin with the root
-# secret. A URL is a path on the machine; the port is 443 unless named.
+# before and after the login with the app secret. A URL is a path on the
+# machine; the port is 443 unless named. Webmin is not shot: it answers only on the access network
+# (decision 0098), and the runner reaches the machine from outside.
 screenshots:
   - {name: site, url: /}
   - name: wp-admin
     url: /wp-login.php
     after: /wp-admin/
     login: {user_field: '#user_login', user: admin, password_field: '#user_pass', secret: app, submit: '#wp-submit'}
-  - name: webmin
-    port: 12321
-    url: /
-    login: {user_field: 'input[name=user]', user: root, password_field: 'input[name=pass]', secret: root, submit: 'button[type=submit]'}
-    wait: 8
-    text: System hostname
 # The cloud modes (decision 0076). The prompts are the titles of the
 # confconsole screens, which are data here: a new title is a change of
 # this file, not of keel-commission. The installer of the vm-iso pass
@@ -186,12 +181,6 @@ nodes:
     screenshots:
       - {name: site, url: /}
       - {name: wp-login, url: /wp-login.php, text: This node is the replica of a cloud pair.}
-      - name: webmin
-        port: 12321
-        url: /
-        login: {user_field: 'input[name=user]', user: root, password_field: 'input[name=pass]', secret: root, submit: 'button[type=submit]'}
-        wait: 8
-        text: System hostname
   # cloud advanced (decision 0076): the primary and the Keel Core witness
   # on BR1, the replica on BR2 while BR3 is down. The names differ from the
   # nodes of cloud simple: a record names each check NODE:CHECK.
@@ -221,12 +210,6 @@ nodes:
     screenshots:
       - {name: site, url: /}
       - {name: wp-login, url: /wp-login.php, text: This node is the replica of a cloud pair.}
-      - name: webmin
-        port: 12321
-        url: /
-        login: {user_field: 'input[name=user]', user: root, password_field: 'input[name=pass]', secret: root, submit: 'button[type=submit]'}
-        wait: 8
-        text: System hostname
   - name: witness
     site: br1
     mode: cloud_advanced
