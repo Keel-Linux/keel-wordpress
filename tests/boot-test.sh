@@ -27,7 +27,9 @@
 #      database keel_check), and the apt sources of the archive are enabled and signed (the files only: the
 #      runner of the image gate has no route to the archive, and the update
 #      path is the business of the boot test of Core)
-#   7. keel diff reports no drift between the spec and the machine
+#   7. the init fence is down after the first boot, and keel's ruleset holds
+#      no rule of it (keel#322, keel#338)
+#   8. keel diff reports no drift between the spec and the machine
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and keel
 # verify; runnable by hand as root on any host with LXC, see tests/README.md.
@@ -267,6 +269,19 @@ rm -f "$passfile" "$container_dir/bad_password"
 bt_build_leftovers_verdict "$BT_ROOTFS"
 bt_no_stack_check_verdict "$BT_ROOTFS"
 bt_sources_verdict "$BT_ROOTFS/$BT_SOURCES"
+
+# 11b. The init fence is down, and keel's ruleset holds no rule of it
+#      (keel#322). No person applies before this check. What systemd and
+#      the journal say of the fence is printed first, so a failure here
+#      names its cause.
+fence=$(inside "systemctl is-enabled turnkey-init-fence.service 2>/dev/null" || true)
+rules=$(grep -c 'ct status dnat' "$BT_ROOTFS/etc/keel/firewall/keel-manifest.nft" || true)
+keel_version=$(inside "dpkg-query -W -f '\${Version}' keel" || true)
+log "turnkey-init-fence.service: ${fence:-unknown}; ct status dnat lines in keel's ruleset: ${rules:-none}"
+inside "systemctl show -p ActiveState -p SubState -p Result -p ExecMainStatus turnkey-init-fence.service; \
+    journalctl -b --no-pager -o short-monotonic -u turnkey-init-fence.service | tail -n 30; \
+    cat /var/lib/inithooks/deferred 2>/dev/null" || true
+bt_fence_verdict "${fence:-unknown}" "${rules:-}" "${keel_version:-unknown}"
 
 # 12. No drift between the declared spec and the booted root.
 set +e
